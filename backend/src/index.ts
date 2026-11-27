@@ -2,6 +2,7 @@ import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { env } from "./env";
 import { arbiter } from "./solana";
+import "./db";
 
 const app = express();
 app.use(cors());
