@@ -159,3 +159,57 @@ test("evaluateDeliverable throws AiServiceTimeoutError when request exceeds time
     }
   );
 });
+
+test("contract test: matches Hamza's exact HTML request and inconclusive Verdict payload", async () => {
+  const hamzaRequest: EvaluateRequest = {
+    job_title: "Landing page",
+    description: "Build a landing page for a cafe",
+    criteria: [
+      "Responsive navbar",
+      "Contact form",
+      "3 menu items",
+      "Footer with opening hours",
+    ],
+    deliverable: {
+      source_url: "https://example.com/cafe/index.html",
+      content:
+        '<!doctype html><html><body><nav class="nav">Menu</nav><form id="contact"></form></body></html>',
+      content_type: "html",
+    },
+  };
+
+  const hamzaResponse = {
+    verdict: "inconclusive",
+    score: 40,
+    criteria: [
+      { criterion: "Responsive navbar", met: true, evidence: '<nav class="nav">', confidence: 0.7 },
+      { criterion: "Contact form", met: true, evidence: '<form id="contact">', confidence: 0.8 },
+      { criterion: "3 menu items", met: null, evidence: "", confidence: 0.2 },
+      { criterion: "Footer with opening hours", met: false, evidence: "", confidence: 0.9 },
+    ],
+    summary: "Partial implementation; some criteria could not be verified.",
+    risks: ["incomplete_deliverable"],
+  };
+
+  let sentBody: unknown;
+  const mockFetch: typeof fetch = async (_url, init) => {
+    sentBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify(hamzaResponse), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  const result = await evaluateDeliverable(hamzaRequest, { fetchFn: mockFetch });
+
+  assert.deepEqual(sentBody, hamzaRequest);
+  assert.equal(result.verdict, "inconclusive");
+  assert.equal(result.score, 40);
+  assert.deepEqual(
+    result.criteria.map((c) => c.criterion),
+    hamzaRequest.criteria
+  );
+  assert.equal(result.criteria[2].met, null);
+  assert.equal(result.criteria[2].evidence, "");
+  assert.deepEqual(result.risks, ["incomplete_deliverable"]);
+});
