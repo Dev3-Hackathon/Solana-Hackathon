@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program, BN, AnchorError } from "@coral-xyz/anchor";
-import { Keypair, LAMPORTS_PER_SOL, PublicKey, Transaction } from "@solana/web3.js";
+import { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { assert } from "chai";
 import * as fs from "fs";
 import * as path from "path";
@@ -462,6 +462,67 @@ describe("escrow", () => {
     });
   });
 
+  describe("Pollar path: create_job_for + confirm_funding", () => {
+    async function createFor(clientPk: PublicKey, freelancerPk: PublicKey) {
+      const relayer = await fundedWallet(1);
+      const jobId = new BN(nextJobId++);
+      const job = jobPda(clientPk, jobId);
+      await program.methods
+        .createJobFor(jobId, clientPk, freelancerPk, AMOUNT, SPEC_HASH, new BN(now() + 3600), new BN(WINDOW_SECS))
+        .accountsPartial({ payer: relayer.publicKey, job })
+        .signers([relayer])
+        .rpc();
+      return job;
+    }
+    const confirm = (job: PublicKey) =>
+      program.methods.confirmFunding().accountsPartial({ job }).rpc();
+
+    it("relayer creates a job for a client who never signs", async () => {
+      const client = Keypair.generate(); // e.g. a Pollar social-login wallet
+      const freelancer = Keypair.generate();
+      const job = await createFor(client.publicKey, freelancer.publicKey);
+      const acc = await program.account.job.fetch(job);
+      assert.ok(acc.client.equals(client.publicKey));
+      assert.equal(Object.keys(acc.status)[0], "created");
+    });
+
+    it("confirm_funding fails until the PDA holds the amount", async () => {
+      const job = await createFor(Keypair.generate().publicKey, Keypair.generate().publicKey);
+      await expectError(confirm(job), "NotFunded");
+    });
+
+    it("plain transfer to the PDA (what Pollar sendPayment does) + confirm_funding -> Funded", async () => {
+      const client = await fundedWallet(2);
+      const freelancer = await fundedWallet(1);
+      const job = await createFor(client.publicKey, freelancer.publicKey);
+
+      // Simulates Pollar: a plain SystemProgram transfer, no escrow instruction.
+      await provider.sendAndConfirm(
+        new Transaction().add(
+          SystemProgram.transfer({ fromPubkey: client.publicKey, toPubkey: job, lamports: AMOUNT.toNumber() })
+        ),
+        [client]
+      );
+      await confirm(job);
+      assert.equal(await statusOf(job), "funded");
+      await expectError(confirm(job), "InvalidStatus");
+
+      // The rest of the escrow flow is unchanged.
+      const c = { client, freelancer, jobId: new BN(0), job };
+      await program.methods.acceptJob().accountsPartial({ freelancer: freelancer.publicKey, job }).signers([freelancer]).rpc();
+      await program.methods
+        .submitWork("http://localhost:4000/api/deliverables/test", DELIVERABLE_HASH)
+        .accountsPartial({ freelancer: freelancer.publicKey, job })
+        .signers([freelancer])
+        .rpc();
+      await propose(c, PASS, 90);
+      await sleep(WINDOW_SECS + 2);
+      const before = await balance(freelancer.publicKey);
+      await finalize(c);
+      assert.equal(await balance(freelancer.publicKey), before + AMOUNT.toNumber());
+    });
+  });
+  
   describe("cancel_job", () => {
     it("client can cancel a funded job before acceptance and gets refunded", async () => {
       const c = await setupJob("funded");
