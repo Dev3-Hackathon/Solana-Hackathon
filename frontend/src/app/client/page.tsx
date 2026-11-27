@@ -4,6 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
+import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
 
 const FALLBACK_SOL_USD = 150;
 
@@ -17,6 +18,9 @@ export default function ClientPortalPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [isEstimating, setIsEstimating] = useState(false);
+  const [priceEstimate, setPriceEstimate] = useState<PriceEstimateResponse | null>(null);
 
   const [solUsdRate, setSolUsdRate] = useState<number>(FALLBACK_SOL_USD);
   const [isLiveRate, setIsLiveRate] = useState<boolean>(false);
@@ -32,17 +36,38 @@ export default function ClientPortalPage() {
           setIsLiveRate(true);
         }
       })
-      .catch(() => {
-        // Keep FALLBACK_SOL_USD when offline
-      });
+      .catch(() => {});
     return () => {
       active = false;
     };
   }, []);
 
   const parsedSol = parseFloat(amountSol);
-  const usdEstimate =
-    !Number.isNaN(parsedSol) && parsedSol > 0 ? parsedSol * solUsdRate : 0;
+  const validSol = !Number.isNaN(parsedSol) && parsedSol > 0 ? parsedSol : 0;
+  const usdEstimate = validSol * solUsdRate;
+
+  const isLowball = priceEstimate !== null && validSol < priceEstimate.minSol;
+  const isHighball = priceEstimate !== null && validSol > priceEstimate.maxSol;
+  const isOutOfBounds = isLowball || isHighball;
+
+  const handleGetAiEstimate = async () => {
+    if (!title.trim() && !description.trim()) {
+      setCreateError("Enter a job title or acceptance criteria first so AI can price the scope.");
+      return;
+    }
+    setCreateError(null);
+    setIsEstimating(true);
+    try {
+      const estimate = await estimateJobPrice({
+        title: title.trim(),
+        description: description.trim(),
+      });
+      setPriceEstimate(estimate);
+      setAmountSol(estimate.recommendedSol.toFixed(2));
+    } finally {
+      setIsEstimating(false);
+    }
+  };
 
   const activeClientWallet =
     role === "client" && walletAddress ? walletAddress : DEMO_WALLETS.client;
@@ -59,6 +84,20 @@ export default function ClientPortalPage() {
     e.preventDefault();
     if (!title.trim() || isSubmitting) return;
 
+    if (isLowball && priceEstimate) {
+      setCreateError(
+        `Lowball protection: Amount (${validSol.toFixed(2)} SOL) is below the AI minimum of ${priceEstimate.minSol.toFixed(2)} SOL.`
+      );
+      return;
+    }
+
+    if (isHighball && priceEstimate) {
+      setCreateError(
+        `Highball protection: Amount (${validSol.toFixed(2)} SOL) exceeds the AI maximum of ${priceEstimate.maxSol.toFixed(2)} SOL.`
+      );
+      return;
+    }
+
     setCreateError(null);
     setCreatedBanner(null);
     setIsSubmitting(true);
@@ -68,12 +107,13 @@ export default function ClientPortalPage() {
       const created = await createJob(
         title.trim(),
         description.trim() || "Written acceptance criteria attached.",
-        Number(amountSol) || 1
+        validSol || 1
       );
       setTitle("");
       setDescription("");
+      setPriceEstimate(null);
       setCreatedBanner(
-        `Created & funded Job #${created.job.jobId} (${amountSol} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
+        `Created & funded Job #${created.job.jobId} (${validSol.toFixed(2)} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
       );
       setTimeout(() => setCreatedBanner(null), 4000);
     } catch (err) {
@@ -117,7 +157,7 @@ export default function ClientPortalPage() {
         onSubmit={handleCreate}
         className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4"
       >
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-semibold text-slate-900">
             Create &amp; Fund New Escrow Job
           </h2>
@@ -135,25 +175,42 @@ export default function ClientPortalPage() {
               disabled={isSubmitting}
               placeholder="e.g., Build Solana Webhook Indexer"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                setPriceEstimate(null);
+              }}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-700">
-              Escrow Amount (SOL)
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-medium text-slate-700">
+                Escrow Amount (SOL)
+              </label>
+              <button
+                type="button"
+                disabled={isEstimating || isSubmitting}
+                onClick={handleGetAiEstimate}
+                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 disabled:opacity-50"
+              >
+                {isEstimating ? "Pricing..." : "✨ AI Fair Price"}
+              </button>
+            </div>
             <div className="relative mt-1 flex items-center">
               <input
                 type="number"
-                step="0.1"
+                step="0.05"
                 min="0.1"
                 required
                 disabled={isSubmitting}
                 value={amountSol}
                 onChange={(e) => setAmountSol(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 py-2 pl-3 pr-24 text-sm text-slate-900 tabular-nums focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
+                className={`w-full rounded-lg border py-2 pl-3 pr-24 text-sm text-slate-900 tabular-nums focus:outline-none disabled:bg-slate-50 disabled:text-slate-400 ${
+                  isOutOfBounds
+                    ? "border-red-400 bg-red-50/30 focus:border-red-500"
+                    : "border-slate-300 focus:border-indigo-500"
+                }`}
               />
               <span className="pointer-events-none absolute right-2.5 rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums">
                 ≈ ${usdEstimate.toFixed(2)}
@@ -171,10 +228,63 @@ export default function ClientPortalPage() {
             disabled={isSubmitting}
             placeholder="e.g., Unit tests passing, PR merged, latency under 200ms"
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setPriceEstimate(null);
+            }}
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
           />
         </div>
+
+        {/* AI Recommended Price Guardrail Banner */}
+        {priceEstimate && (
+          <div
+            className={`rounded-lg border p-3.5 text-xs space-y-2 ${
+              isOutOfBounds
+                ? "border-red-200 bg-red-50/70 text-red-900"
+                : "border-indigo-200 bg-indigo-50/60 text-slate-800"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                  AI Recommended: {priceEstimate.recommendedSol.toFixed(2)} SOL (≈ $
+                  {(priceEstimate.recommendedSol * solUsdRate).toFixed(2)})
+                </span>
+                <span className="font-medium text-slate-600 tabular-nums">
+                  Allowed Fair Band: {priceEstimate.minSol.toFixed(2)} –{" "}
+                  {priceEstimate.maxSol.toFixed(2)} SOL
+                </span>
+              </div>
+
+              {validSol !== priceEstimate.recommendedSol && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAmountSol(priceEstimate.recommendedSol.toFixed(2));
+                    setCreateError(null);
+                  }}
+                  className="rounded bg-white px-2.5 py-1 text-[11px] font-semibold text-indigo-700 border border-indigo-200 hover:bg-indigo-50"
+                >
+                  Snap to {priceEstimate.recommendedSol.toFixed(2)} SOL
+                </button>
+              )}
+            </div>
+
+            <p className="text-slate-600">{priceEstimate.rationale}</p>
+
+            {isLowball && (
+              <p className="font-semibold text-red-700">
+                Lowball blocked: Please offer at least {priceEstimate.minSol.toFixed(2)} SOL for this scope.
+              </p>
+            )}
+            {isHighball && (
+              <p className="font-semibold text-red-700">
+                Highball blocked: Cap escrow at {priceEstimate.maxSol.toFixed(2)} SOL or expand the acceptance criteria.
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -190,13 +300,26 @@ export default function ClientPortalPage() {
             )}
           </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "Creating & Linking Spec..." : "Create & Lock Funds"}
-          </button>
+          <div className="flex items-center gap-2">
+            {!priceEstimate && (
+              <button
+                type="button"
+                disabled={isEstimating || isSubmitting}
+                onClick={handleGetAiEstimate}
+                className="rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                {isEstimating ? "Analyzing Scope..." : "Check AI Fair Price"}
+              </button>
+            )}
+
+            <button
+              type="submit"
+              disabled={isSubmitting || isOutOfBounds}
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? "Creating & Linking Spec..." : "Create & Lock Funds"}
+            </button>
+          </div>
         </div>
       </form>
 
