@@ -8,7 +8,6 @@ import { useSession } from "../../../context/SessionContext";
 import { fetchJobReport, triggerJobEvaluation } from "../../../lib/api";
 import { Verdict } from "../../../types";
 
-const REVIEW_TIMEOUT_SECS = Number(process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS ?? 300);
 const FALLBACK_SOL_USD = 150;
 
 function JobDetailContent() {
@@ -82,7 +81,8 @@ function JobDetailContent() {
   const amountSol = job.amount / 1_000_000_000;
   const amountUsd = amountSol * solUsdRate;
 
-  const deadlineSecs = job.submittedAt > 0 ? job.submittedAt + REVIEW_TIMEOUT_SECS : 0;
+  const disputeWindowSecs = Number(job.disputeWindowSecs) || 300;
+  const deadlineSecs = job.submittedAt > 0 ? job.submittedAt + disputeWindowSecs : 0;
   const secondsRemaining = deadlineSecs > 0 ? Math.max(0, deadlineSecs - nowSecs) : 0;
   const isOverdue = job.status === "Submitted" && deadlineSecs > 0 && nowSecs >= deadlineSecs;
 
@@ -253,8 +253,8 @@ function JobDetailContent() {
             {job.status === "Submitted" && (
               <span className="ml-3 text-slate-500">
                 {isOverdue
-                  ? "(Review timeout elapsed)"
-                  : `(Auto-timeout in ${secondsRemaining}s)`}
+                  ? `(Review timeout elapsed after ${disputeWindowSecs}s)`
+                  : `(Auto-timeout in ${secondsRemaining}s / ${disputeWindowSecs}s window)`}
               </span>
             )}
           </div>
@@ -423,7 +423,7 @@ function JobDetailContent() {
             <p className="text-xs text-slate-600">
               {isOverdue || evalError?.isTimeout404 || verdict?.verdict === "fail"
                 ? "Dispute window is unlocked. Escalate to Admin arbitration."
-                : `Unlocks automatically if AI review fails or review times out (${secondsRemaining}s remaining).`}
+                : `Unlocks automatically after ${disputeWindowSecs}s timeout (${secondsRemaining}s remaining) or if AI review fails.`}
             </p>
             <input
               type="text"

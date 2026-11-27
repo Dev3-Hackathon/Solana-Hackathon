@@ -4,15 +4,14 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { BN, Idl } from "@coral-xyz/anchor";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
-import { JobRecord, JobStatus, Verdict } from "../types";
+import { Job, JobRecord, JobStatus, Verdict } from "../types";
 import { SEED_JOBS } from "../lib/mockJobs";
 import { postJobSpec, linkJobSpec } from "../lib/api";
 import { useProgram } from "../hooks/useProgram";
 import { DEMO_WALLETS } from "./SessionContext";
+import escrowIdl from "../idl/escrow.json";
 
-// Once Helya drops escrow.json into frontend/src/idl/escrow.json, uncomment:
-// import escrowIdl from "../idl/escrow.json";
-const ESCROW_IDL: Idl | null = null;
+const ESCROW_IDL = escrowIdl as unknown as Idl;
 
 interface JobsContextValue {
   records: JobRecord[];
@@ -35,7 +34,50 @@ interface JobsContextValue {
 
 const JobsContext = createContext<JobsContextValue | undefined>(undefined);
 
-const STORAGE_KEY = "proofpay_jobs_v1";
+const STORAGE_KEY = "proofpay_jobs_v2";
+
+function toNum(val: unknown, fallback = 0): number {
+  if (typeof val === "number") return val;
+  if (val && typeof (val as { toNumber?: () => number }).toNumber === "function") {
+    return (val as { toNumber: () => number }).toNumber();
+  }
+  return fallback;
+}
+
+function parseAnchorStatus(rawStatus: unknown): JobStatus {
+  if (typeof rawStatus === "string") return rawStatus as JobStatus;
+  if (rawStatus && typeof rawStatus === "object") {
+    const key = Object.keys(rawStatus)[0];
+    if (key) {
+      return (key.charAt(0).toUpperCase() + key.slice(1)) as JobStatus;
+    }
+  }
+  return "Created";
+}
+
+export function normalizeOnChainJob(raw: Record<string, unknown>): Job {
+  return {
+    jobId: toNum(raw.jobId),
+    client: String(raw.client ?? ""),
+    freelancer: String(raw.freelancer ?? ""),
+    arbiter: String(raw.arbiter ?? ""),
+    admin: String(raw.admin ?? ""),
+    amount: toNum(raw.amount),
+    specHash: Array.isArray(raw.specHash) ? (raw.specHash as number[]) : [],
+    deliverableUri: String(raw.deliverableUri ?? ""),
+    deliverableHash: Array.isArray(raw.deliverableHash) ? (raw.deliverableHash as number[]) : [],
+    status: parseAnchorStatus(raw.status),
+    verdict: toNum(raw.verdict),
+    verdictScore: toNum(raw.verdictScore),
+    verdictUri: String(raw.verdictUri ?? ""),
+    verdictProposedAt: toNum(raw.verdictProposedAt),
+    disputeWindowSecs: toNum(raw.disputeWindowSecs, 300),
+    deadline: toNum(raw.deadline),
+    disputedBy: String(raw.disputedBy ?? ""),
+    bump: toNum(raw.bump),
+    submittedAt: toNum(raw.submittedAt),
+  };
+}
 
 function to32ByteArray(specHash: number[] | string): number[] {
   if (Array.isArray(specHash)) {
@@ -96,7 +138,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     const now = Math.floor(Date.now() / 1000);
     const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
 
-    // LIVE ON-CHAIN PATH (Active once ESCROW_IDL is provided and wallet is connected)
     if (isReady && program && publicKey) {
       const { specId, specHash } = await postJobSpec({
         title,
@@ -123,40 +164,51 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         })
         .rpc();
 
+      const accountNamespace = program.account as Record<
+        string,
+        { fetch: (addr: PublicKey) => Promise<Record<string, unknown>> }
+      >;
+      const fetchedRaw = accountNamespace.job
+        ? await accountNamespace.job.fetch(jobPda).catch(() => null)
+        : null;
+
       await linkJobSpec(jobPda.toBase58(), { specId, specHash });
+
+      const normalizedJob: Job = fetchedRaw
+        ? normalizeOnChainJob(fetchedRaw)
+        : {
+            jobId: nextId,
+            client: publicKey.toBase58(),
+            freelancer: freelancerPubkey.toBase58(),
+            arbiter: "ArbIter444444444444444444444444444444444444",
+            admin: DEMO_WALLETS.admin,
+            amount: lamports,
+            specHash: specHashBytes,
+            deliverableUri: "",
+            deliverableHash: new Array(32).fill(0),
+            status: "Funded",
+            verdict: 0,
+            verdictScore: 0,
+            verdictUri: "",
+            verdictProposedAt: 0,
+            disputeWindowSecs: 300,
+            deadline: now + 86400,
+            disputedBy: "",
+            bump: 255,
+            submittedAt: 0,
+          };
 
       const newRecord: JobRecord = {
         pda: jobPda.toBase58(),
         title,
         description,
-        job: {
-          jobId: nextId,
-          client: publicKey.toBase58(),
-          freelancer: freelancerPubkey.toBase58(),
-          arbiter: "ArbIter444444444444444444444444444444444444",
-          admin: DEMO_WALLETS.admin,
-          amount: lamports,
-          specHash: specHashBytes,
-          deliverableUri: "",
-          deliverableHash: new Array(32).fill(0),
-          status: "Funded",
-          verdict: 0,
-          verdictScore: 0,
-          verdictUri: "",
-          verdictProposedAt: 0,
-          disputeWindowSecs: 300,
-          deadline: now + 86400,
-          disputedBy: "",
-          bump: 255,
-          submittedAt: 0,
-        },
+        job: normalizedJob,
       };
 
       setRecords((prev) => [newRecord, ...prev]);
       return newRecord;
     }
 
-    // MOCK FALLBACK PATH (Used while awaiting Helya's IDL)
     const pda = `JobPda${nextId}Mock111111111111111111111111111111`;
     const newRecord: JobRecord = {
       pda,
@@ -246,7 +298,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         r.pda === pda
           ? {
               ...r,
-              disputeReason: reason || "Manual dispute raised",
+              disputeReason: reason || "Review timed out — escalated to Admin",
               job: {
                 ...r.job,
                 status: "Disputed",

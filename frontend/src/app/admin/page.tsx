@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useJobs } from "../../context/JobContext";
 import { useSession } from "../../context/SessionContext";
 
-const REVIEW_TIMEOUT_SECS = Number(process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS ?? 300);
 const ADMIN_PASSCODE = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin";
 const ADMIN_ALLOWLIST_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "";
 const ADMIN_AUTH_STORAGE_KEY = "proofpay_admin_unlocked";
@@ -60,7 +59,7 @@ export default function AdminConsolePage() {
 
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
-    if (passcodeInput.trim() === ADMIN_PASSCODE) {
+    if (passcodeInput.trim() === ADMIN_PASSCODE.trim()) {
       setAuthError(null);
       setIsUnlocked(true);
       window.sessionStorage.setItem(ADMIN_AUTH_STORAGE_KEY, "true");
@@ -136,12 +135,18 @@ export default function AdminConsolePage() {
 
   const nowSecs = Math.floor(Date.now() / 1000);
 
-  const isOverdueJob = (status: string, submittedAt: number) =>
-    status === "Submitted" && submittedAt > 0 && nowSecs >= submittedAt + REVIEW_TIMEOUT_SECS;
+  const isOverdueJob = (
+    status: string,
+    submittedAt: number,
+    disputeWindowSecs: number
+  ) =>
+    status === "Submitted" &&
+    submittedAt > 0 &&
+    nowSecs >= submittedAt + (Number(disputeWindowSecs) || 300);
 
   const disputedJobs = records.filter((r) => r.job.status === "Disputed");
   const overdueJobs = records.filter((r) =>
-    isOverdueJob(r.job.status, r.job.submittedAt)
+    isOverdueJob(r.job.status, r.job.submittedAt, r.job.disputeWindowSecs)
   );
   const resolvedJobs = records.filter((r) =>
     ["Released", "Refunded", "Resolved", "Cancelled"].includes(r.job.status)
@@ -153,7 +158,7 @@ export default function AdminConsolePage() {
     if (filter === "attention") {
       return (
         r.job.status === "Disputed" ||
-        isOverdueJob(r.job.status, r.job.submittedAt)
+        isOverdueJob(r.job.status, r.job.submittedAt, r.job.disputeWindowSecs)
       );
     }
     if (filter === "resolved") {
@@ -183,8 +188,8 @@ export default function AdminConsolePage() {
             Monitor disputed escrows, timed-out reviews, and execute split payouts.
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            1 SOL ≈ ${solUsdRate.toFixed(2)} USD{isLiveRate ? "" : " (est.)"} · Review Timeout:{" "}
-            {REVIEW_TIMEOUT_SECS}s
+            1 SOL ≈ ${solUsdRate.toFixed(2)} USD{isLiveRate ? "" : " (est.)"} · Per-job on-chain{" "}
+            <code className="font-mono">disputeWindowSecs</code>
           </p>
         </div>
 
@@ -254,7 +259,11 @@ export default function AdminConsolePage() {
           </div>
         ) : (
           filteredRecords.map((rec) => {
-            const overdue = isOverdueJob(rec.job.status, rec.job.submittedAt);
+            const overdue = isOverdueJob(
+              rec.job.status,
+              rec.job.submittedAt,
+              rec.job.disputeWindowSecs
+            );
             const jobSol = rec.job.amount / 1_000_000_000;
 
             return (
