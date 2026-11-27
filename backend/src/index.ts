@@ -1,5 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { env } from "./env";
 import { arbiter, getArbiterBalanceSol } from "./solana";
 import "./db";
@@ -12,6 +13,19 @@ import { jobsRouter } from "./routes/jobs";
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+const costlyEndpointLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      error: "Too many requests; please wait a minute before retrying",
+      code: "RATE_LIMITED",
+    });
+  },
+});
 
 app.get("/api/health", async (_req, res) => {
   let aiService: "up" | "down" = "down";
@@ -36,6 +50,9 @@ app.get("/api/health", async (_req, res) => {
     aiService,
   });
 });
+
+app.use("/api/deliverables/snapshot", costlyEndpointLimiter);
+app.use("/api/jobs/:jobPda/evaluate", costlyEndpointLimiter);
 
 app.use("/api", specsRouter);
 app.use("/api", reportsRouter);
