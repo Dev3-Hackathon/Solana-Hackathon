@@ -5,6 +5,8 @@ import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.j
 import { env } from "./env";
 import { HttpError } from "./http";
 import { decodeJobAccount, JobView } from "./job";
+import { VerdictOutcome } from "./ai";
+import { VERDICT_CODES } from "./evaluate";
 
 export const connection = new Connection(env.RPC_URL, "confirmed");
 
@@ -109,4 +111,29 @@ export async function getArbiterBalanceSol(): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+export async function proposeVerdictOnChain(
+  jobPda: string,
+  outcome: VerdictOutcome,
+  score: number,
+  verdictUri: string
+): Promise<string> {
+  if (Buffer.byteLength(verdictUri, "utf8") > 200) {
+    throw new HttpError(400, "URI_TOO_LONG", "verdict_uri exceeds 200 bytes");
+  }
+
+  const program = getProgram();
+  const code = VERDICT_CODES[outcome];
+
+  const txSignature = await program.methods
+    .proposeVerdict(code, score, verdictUri)
+    .accounts({
+      arbiter: arbiter.publicKey,
+      job: new PublicKey(jobPda),
+    })
+    .signers([arbiter])
+    .rpc();
+
+  return txSignature;
 }
