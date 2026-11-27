@@ -17,8 +17,9 @@ import {
   resolveOnChainVerdict,
 } from "../evaluate";
 import { sha256Hex } from "../hash";
-import { HttpError, requirePubkey } from "../http";
+import { HttpError, parseBody, requirePubkey } from "../http";
 import { getJob, proposeVerdictOnChain } from "../solana";
+import { z } from "zod";
 
 export const jobsRouter = Router();
 
@@ -222,4 +223,51 @@ jobsRouter.post("/jobs/:jobPda/evaluate", async (req, res) => {
   } finally {
     inFlightEvaluations.delete(jobPda);
   }
+});
+
+const disputeNoteSchema = z.object({
+  wallet: z.string().trim().min(32).max(64),
+  reason: z.string().trim().min(1).max(1000),
+});
+
+interface DisputeNoteRow {
+  wallet: string;
+  reason: string;
+  created_at: string;
+}
+
+// 3.8  POST /api/jobs/:jobPda/dispute-note
+jobsRouter.post("/jobs/:jobPda/dispute-note", (req, res) => {
+  const jobPda = requirePubkey(req.params.jobPda);
+  const { wallet, reason } = parseBody(disputeNoteSchema, req.body);
+  requirePubkey(wallet);
+
+  db.prepare(
+    `INSERT INTO dispute_notes (job_pda, wallet, reason) VALUES (?, ?, ?)`
+  ).run(jobPda, wallet, reason);
+
+  console.log(`[dispute-note] ${jobPda} note added by ${wallet}`);
+  res.status(201).json({ ok: true });
+});
+
+// 3.8  GET /api/jobs/:jobPda/dispute-notes
+jobsRouter.get("/jobs/:jobPda/dispute-notes", (req, res) => {
+  const jobPda = requirePubkey(req.params.jobPda);
+
+  const rows = db
+    .prepare(
+      `SELECT wallet, reason, created_at
+       FROM dispute_notes
+       WHERE job_pda = ?
+       ORDER BY id ASC`
+    )
+    .all(jobPda) as DisputeNoteRow[];
+
+  res.json({
+    notes: rows.map((r) => ({
+      wallet: r.wallet,
+      reason: r.reason,
+      createdAt: r.created_at,
+    })),
+  });
 });
