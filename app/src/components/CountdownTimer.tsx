@@ -1,7 +1,6 @@
-// app/src/components/CountdownTimer.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface CountdownTimerProps {
     targetTimestampSecs: number;
@@ -17,7 +16,17 @@ export default function CountdownTimer({
     const [timeLeft, setTimeLeft] = useState<number>(0);
     const [isExpired, setIsExpired] = useState<boolean>(false);
 
+    const onTimeoutRef = useRef(onTimeout);
+    const hasTriggeredRef = useRef(false);
+
     useEffect(() => {
+        onTimeoutRef.current = onTimeout;
+    }, [onTimeout]);
+
+    useEffect(() => {
+        hasTriggeredRef.current = false;
+        setIsExpired(false);
+
         const calculateTimeLeft = () => {
             const nowSecs = Math.floor(Date.now() / 1000);
             const diff = targetTimestampSecs - nowSecs;
@@ -25,18 +34,35 @@ export default function CountdownTimer({
             if (diff <= 0) {
                 setTimeLeft(0);
                 setIsExpired(true);
-                onTimeout();
-                return;
+
+                if (!hasTriggeredRef.current) {
+                    hasTriggeredRef.current = true;
+                    onTimeoutRef.current();
+                }
+
+                return true;
             }
 
             setTimeLeft(diff);
+            return false;
         };
 
-        calculateTimeLeft();
-        const timer = setInterval(calculateTimeLeft, 1000);
+        const alreadyExpired = calculateTimeLeft();
+
+        if (alreadyExpired) {
+            return;
+        }
+
+        const timer = setInterval(() => {
+            const expired = calculateTimeLeft();
+
+            if (expired) {
+                clearInterval(timer);
+            }
+        }, 1000);
 
         return () => clearInterval(timer);
-    }, [targetTimestampSecs, onTimeout]);
+    }, [targetTimestampSecs]);
 
     if (isExpired) {
         return <span className="text-red-600 font-bold">{expiredText}</span>;
