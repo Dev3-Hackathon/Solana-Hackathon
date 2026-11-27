@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
+import { WalletContextProvider } from "../context/WalletContextProvider";
 import { SessionProvider } from "../context/SessionContext";
 import { JobsProvider } from "../context/JobContext";
 import Navbar from "../components/NavBar";
@@ -17,17 +19,21 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-slate-50 text-slate-900 antialiased flex flex-col">
-        <SessionProvider>
-          <JobsProvider>
-            <Navbar />
-            <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
-              {children}
-            </main>
-            <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
-              Non-custodial PDA escrow · Arbiter can only propose verdicts, never move funds
-            </footer>
-          </JobsProvider>
-        </SessionProvider>
+        <WalletContextProvider>
+          <SessionProvider>
+            <JobsProvider>
+              <Suspense fallback={<div className="h-[61px] border-b border-slate-200 bg-white/95" />}>
+                <Navbar />
+              </Suspense>
+              <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
+                {children}
+              </main>
+              <footer className="border-t border-slate-200 bg-white py-4 text-center text-xs text-slate-500">
+                Non-custodial PDA escrow · Arbiter can only propose verdicts, never move funds
+              </footer>
+            </JobsProvider>
+          </SessionProvider>
+        </WalletContextProvider>
       </body>
     </html>
   );

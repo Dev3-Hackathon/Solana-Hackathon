@@ -1,20 +1,44 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "../context/SessionContext";
+import { fetchBackendHealth } from "../lib/api";
+
+const DUMMY_ARBITER_SOL = 0.42;
 
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { role, walletAddress, logout } = useSession();
+  const [arbiterSol, setArbiterSol] = useState<number>(DUMMY_ARBITER_SOL);
+  const [isLiveHealth, setIsLiveHealth] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    fetchBackendHealth().then((health) => {
+      if (!active) return;
+      if (typeof health?.arbiterBalanceSol === "number") {
+        setArbiterSol(health.arbiterBalanceSol);
+        setIsLiveHealth(true);
+      } else {
+        setArbiterSol(DUMMY_ARBITER_SOL);
+        setIsLiveHealth(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const navLinks = [
     { href: "/client", label: "Client Portal" },
     { href: "/seller", label: "Seller Portal" },
     { href: "/admin", label: "Admin Console" },
   ];
+
+  const isArbiterLow = arbiterSol < 0.05;
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
@@ -50,6 +74,22 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <span
+            className={`inline-block rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums ${
+              isArbiterLow
+                ? "border-red-300 bg-red-50 text-red-700"
+                : "border-emerald-200 bg-emerald-50 text-emerald-800"
+            }`}
+            title={
+              isLiveHealth
+                ? "Live Backend Arbiter Relayer SOL Balance"
+                : "Dummy Arbiter Balance (Backend offline)"
+            }
+          >
+            Arbiter: {arbiterSol.toFixed(3)} SOL
+            {isArbiterLow ? " (Low!)" : !isLiveHealth ? " · Mock" : ""}
+          </span>
+
           <span className="hidden rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 sm:inline-block">
             Devnet · Mock Preview
           </span>

@@ -426,6 +426,42 @@ describe("escrow", () => {
     });
   });
 
+  describe("no-verdict timeout (stuck funds escape hatch)", () => {
+    it("cannot escalate a Submitted job before the timeout", async () => {
+      const c = await setupJob("submitted");
+      await expectError(
+        program.methods
+          .dispute()
+          .accountsPartial({ signer: c.freelancer.publicKey, job: c.job })
+          .signers([c.freelancer])
+          .rpc(),
+        "ReviewNotTimedOut"
+      );
+    });
+
+    it("after the timeout, freelancer escalates; arbiter can no longer post; admin settles", async () => {
+      const c = await setupJob("submitted");
+      await sleep(WINDOW_SECS + 2);
+      await program.methods
+        .dispute()
+        .accountsPartial({ signer: c.freelancer.publicKey, job: c.job })
+        .signers([c.freelancer])
+        .rpc();
+      assert.equal(await statusOf(c.job), "disputed");
+
+      // a late verdict from the backend is rejected
+      await expectError(propose(c, PASS, 90), "InvalidStatus");
+
+      const before = await balance(c.freelancer.publicKey);
+      await program.methods
+        .resolveDispute(true)
+        .accountsPartial({ admin: admin.publicKey, job: c.job, client: c.client.publicKey, freelancer: c.freelancer.publicKey })
+        .signers([admin])
+        .rpc();
+      assert.equal(await balance(c.freelancer.publicKey), before + AMOUNT.toNumber());
+    });
+  });
+
   describe("cancel_job", () => {
     it("client can cancel a funded job before acceptance and gets refunded", async () => {
       const c = await setupJob("funded");
