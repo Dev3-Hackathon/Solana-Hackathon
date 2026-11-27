@@ -14,6 +14,7 @@ export const DEMO_WALLETS: Record<UserRole, string> = {
 interface SessionContextValue {
   role: UserRole | null;
   walletAddress: string | null;
+  isReady: boolean;
   isWalletConnected: boolean;
   loginAsDemo: (role: UserRole) => void;
   setRole: (role: UserRole) => void;
@@ -27,15 +28,16 @@ const STORAGE_KEY = "proofpay_demo_role";
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { publicKey, connected, disconnect } = useWallet();
   const [role, setRoleState] = useState<UserRole | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY) as UserRole | null;
     if (saved && saved in DEMO_WALLETS) {
       setRoleState(saved);
     }
+    setIsReady(true);
   }, []);
 
-  // Default to "client" role automatically if a browser wallet connects with no role selected yet
   useEffect(() => {
     if (connected && publicKey && !role) {
       setRoleState("client");
@@ -68,6 +70,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       value={{
         role,
         walletAddress,
+        isReady,
         isWalletConnected: Boolean(connectedAddress),
         loginAsDemo,
         setRole,
