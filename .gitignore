@@ -1,12 +1,13 @@
 .anchor
 .DS_Store
-target
+target/*
+!target/idl/
+!target/types/
 **/*.rs.bk
-node_modules
+node_modules/
 test-ledger
 .yarn
 .surfpool
 .env
 keys/
 data/
-node_modules/
