@@ -1,4 +1,5 @@
-from app.providers import LLMProvider, ProviderError
+import time
+from app.providers import LLMProvider, ProviderError, ProviderTimeoutError
 from app.schemas import EvaluateRequest, Verdict
 from app.validator import VerdictValidationError, VerdictValidator
 
@@ -27,6 +28,7 @@ Respond with JSON matching the required schema."""
         validator: VerdictValidator,
         min_content_length: int = 10,
         skip_length_guard: bool = False,
+        total_timeout_secs: float = 45.0,
     ) -> None:
         if not providers:
             raise ValueError("ArbiterService requires at least one LLMProvider")
@@ -34,6 +36,7 @@ Respond with JSON matching the required schema."""
         self._validator = validator
         self._min_content_length = min_content_length
         self._skip_length_guard = skip_length_guard
+        self._total_timeout_secs = total_timeout_secs
 
     @staticmethod
     def _build_user_prompt(req: EvaluateRequest, clean_content: str) -> str:
@@ -60,16 +63,26 @@ Respond with JSON matching the required schema."""
             )
 
         user_prompt = self._build_user_prompt(req, clean_content)
+        deadline = time.monotonic() + self._total_timeout_secs
         last_provider_err: ProviderError | None = None
+        had_timeout_err = False
         had_validation_err = False
 
         for provider in self._providers:
+            if time.monotonic() >= deadline:
+                had_timeout_err = True
+                break
+
             try:
                 raw_json = provider.generate_verdict_json(
                     system_prompt=self.SYSTEM_PROMPT,
                     user_prompt=user_prompt,
                     criteria=req.criteria,
                 )
+            except ProviderTimeoutError as exc:
+                had_timeout_err = True
+                last_provider_err = exc
+                continue
             except ProviderError as exc:
                 last_provider_err = exc
                 continue
@@ -83,6 +96,14 @@ Respond with JSON matching the required schema."""
             except VerdictValidationError:
                 had_validation_err = True
                 continue
+
+        if had_timeout_err:
+            return self._validator.build_inconclusive(
+                criteria=req.criteria,
+                summary="Evaluation timed out before a verdict could be completed; escalating to human review.",
+                risk="model_timeout",
+                model_name=primary_model,
+            )
 
         if had_validation_err:
             return self._validator.build_inconclusive(

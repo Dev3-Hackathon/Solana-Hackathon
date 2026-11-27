@@ -106,7 +106,7 @@ export interface EvaluateOptions {
   fetchFn?: typeof fetch;
 }
 
-const DEFAULT_TIMEOUT_MS = 45_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 async function safeParseJson(res: Response): Promise<unknown> {
   const text = await res.text();
