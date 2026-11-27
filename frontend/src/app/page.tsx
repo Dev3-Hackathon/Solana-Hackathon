@@ -101,7 +101,7 @@ export default function HomePage() {
   const { connection } = useConnection();
 
   const [solUsdRate, setSolUsdRate] = useState<number>(FALLBACK_SOL_USD);
-  const [nowSecs, setNowSecs] = useState(() => Math.floor(Date.now() / 1000));
+  const [nowSecs, setNowSecs] = useState<number>(0);
   const [liveWalletSol, setLiveWalletSol] = useState<number | null>(null);
 
   // Client inline price editing state
@@ -112,6 +112,7 @@ export default function HomePage() {
   const [rateMap, setRateMap] = useState<Record<string, SellerRateAssessment>>({});
 
   useEffect(() => {
+    setNowSecs(Math.floor(Date.now() / 1000));
     const t = setInterval(() => setNowSecs(Math.floor(Date.now() / 1000)), 1000);
     return () => clearInterval(t);
   }, []);

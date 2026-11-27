@@ -10,34 +10,12 @@ const DUMMY_ARBITER_SOL = 0.42;
 
 function ProofPayLogoMark() {
   return (
-    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 text-white shadow-xs transition group-hover:brightness-105">
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        className="h-4 w-4"
-        aria-hidden="true"
-      >
-        <path
-          d="M12 2.75L4.75 5.9v5.65c0 4.86 3.08 9.36 7.25 10.7 4.17-1.34 7.25-5.84 7.25-10.7V5.9L12 2.75Z"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M9.5 11.25V9.75a2.5 2.5 0 0 1 5 0v1.5"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-        />
-        <rect
-          x="8.75"
-          y="11.25"
-          width="6.5"
-          height="5"
-          rx="1.25"
-          fill="currentColor"
-        />
-      </svg>
+    <span className="inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-indigo-200/70 shadow-xs transition group-hover:brightness-105">
+      <img
+        src="/logo/proofpay_logo.png"
+        alt="ProofPay logo"
+        className="h-full w-full object-cover"
+      />
     </span>
   );
 }
