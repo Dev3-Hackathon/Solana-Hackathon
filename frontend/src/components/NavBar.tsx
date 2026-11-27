@@ -8,6 +8,40 @@ import { fetchBackendHealth } from "../lib/api";
 
 const DUMMY_ARBITER_SOL = 0.42;
 
+function ProofPayLogoMark() {
+  return (
+    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 text-white shadow-xs transition group-hover:brightness-105">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        className="h-4 w-4"
+        aria-hidden="true"
+      >
+        <path
+          d="M12 2.75L4.75 5.9v5.65c0 4.86 3.08 9.36 7.25 10.7 4.17-1.34 7.25-5.84 7.25-10.7V5.9L12 2.75Z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9.5 11.25V9.75a2.5 2.5 0 0 1 5 0v1.5"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+        <rect
+          x="8.75"
+          y="11.25"
+          width="6.5"
+          height="5"
+          rx="1.25"
+          fill="currentColor"
+        />
+      </svg>
+    </span>
+  );
+}
+
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -44,11 +78,13 @@ export default function Navbar() {
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2.5">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white">
-              P
-            </span>
-            <span className="font-semibold tracking-tight text-slate-900">
+          <Link
+            href="/"
+            aria-label="ProofPay Home"
+            className="group flex items-center gap-2.5 focus:outline-none"
+          >
+            <ProofPayLogoMark />
+            <span className="font-semibold tracking-tight text-slate-900 group-hover:text-indigo-700 transition">
               ProofPay
             </span>
           </Link>

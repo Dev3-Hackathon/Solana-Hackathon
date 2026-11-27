@@ -24,6 +24,7 @@ interface JobsContextValue {
     amountSol: number,
     sellerAddress?: string
   ) => Promise<JobRecord>;
+  updateJobPrice: (pda: string, nextAmountSol: number) => void;
   submitWork: (pda: string, deliverableUri: string) => void;
   recordVerdict: (pda: string, verdict: Verdict, nextStatus?: JobStatus) => void;
   approveJob: (pda: string) => void;
@@ -240,6 +241,24 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return newRecord;
   };
 
+  const updateJobPrice = (pda: string, nextAmountSol: number) => {
+    if (Number.isNaN(nextAmountSol) || nextAmountSol <= 0) return;
+    const nextLamports = Math.round(nextAmountSol * LAMPORTS_PER_SOL);
+    setRecords((prev) =>
+      prev.map((r) =>
+        r.pda === pda
+          ? {
+              ...r,
+              job: {
+                ...r.job,
+                amount: nextLamports,
+              },
+            }
+          : r
+      )
+    );
+  };
+
   const submitWork = (pda: string, deliverableUri: string) => {
     const now = Math.floor(Date.now() / 1000);
     setRecords((prev) =>
@@ -333,6 +352,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         isLiveChain: isReady,
         getJobByPda,
         createJob,
+        updateJobPrice,
         submitWork,
         recordVerdict,
         approveJob,
