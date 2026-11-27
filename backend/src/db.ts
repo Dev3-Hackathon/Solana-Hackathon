@@ -53,3 +53,9 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_notes_job ON dispute_notes(job_pda);
 `);
+
+// Migration: snapshots.content_type was added in Step 4 (text | html | github_bundle).
+const snapshotCols = db.prepare(`PRAGMA table_info(snapshots)`).all() as { name: string }[];
+if (!snapshotCols.some((c) => c.name === "content_type")) {
+  db.exec(`ALTER TABLE snapshots ADD COLUMN content_type TEXT NOT NULL DEFAULT 'text'`);
+}

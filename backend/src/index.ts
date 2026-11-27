@@ -6,6 +6,7 @@ import "./db";
 import { HttpError } from "./http";
 import { specsRouter } from "./routes/specs";
 import { reportsRouter } from "./routes/reports";
+import { deliverablesRouter } from "./routes/deliverables";
 
 const app = express();
 app.use(cors());
@@ -27,6 +28,7 @@ app.get("/api/health", async (_req, res) => {
 app.use("/api", specsRouter);
 app.use("/api", specsRouter);
 app.use("/api", reportsRouter);
+app.use("/api", deliverablesRouter);
 
 // 404 + error handler: all errors use { error, code }
 app.use((_req, res) => {
