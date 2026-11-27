@@ -193,7 +193,10 @@ export type Escrow = {
     {
       "name": "dispute",
       "docs": [
-        "Client or freelancer contests the AI verdict while the window is open."
+        "Client or freelancer escalates to the admin:",
+        "- VerdictProposed: contest the AI verdict while the window is open.",
+        "- Submitted: no verdict arrived within `dispute_window_secs` of submission",
+        "(backend down / arbiter offline), so funds are not stuck."
       ],
       "discriminator": [
         216,
@@ -577,11 +580,16 @@ export type Escrow = {
     },
     {
       "code": 6011,
+      "name": "reviewNotTimedOut",
+      "msg": "No verdict yet, but the review timeout has not passed"
+    },
+    {
+      "code": 6012,
       "name": "insufficientEscrow",
       "msg": "Escrow balance too low"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "mathOverflow",
       "msg": "Arithmetic overflow"
     }
@@ -689,6 +697,13 @@ export type Escrow = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "submittedAt",
+            "docs": [
+              "Set in submit_work. Lets either party escalate if no verdict arrives."
+            ],
+            "type": "i64"
           },
           {
             "name": "deliverableUri",

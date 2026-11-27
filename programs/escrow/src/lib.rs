@@ -80,6 +80,7 @@ pub mod escrow {
             deadline,
             disputed_by: Pubkey::default(),
             bump: ctx.bumps.job,
+            submitted_at: 0,
             deliverable_uri: String::new(),
             verdict_uri: String::new(),
         });
@@ -149,6 +150,7 @@ pub mod escrow {
 
         job.deliverable_uri = deliverable_uri;
         job.deliverable_hash = deliverable_hash;
+        job.submitted_at = Clock::get()?.unix_timestamp;
         job.status = JobStatus::Submitted;
 
         emit!(WorkSubmitted {
@@ -215,21 +217,30 @@ pub mod escrow {
         Ok(())
     }
 
-    /// Client or freelancer contests the AI verdict while the window is open.
+    /// Client or freelancer escalates to the admin:
+    /// - VerdictProposed: contest the AI verdict while the window is open.
+    /// - Submitted: no verdict arrived within `dispute_window_secs` of submission
+    ///   (backend down / arbiter offline), so funds are not stuck.
     pub fn dispute(ctx: Context<Dispute>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
         let job = &mut ctx.accounts.job;
-        require!(
-            job.status == JobStatus::VerdictProposed,
-            ErrorCode::InvalidStatus
-        );
-        let closes_at = job
-            .verdict_proposed_at
-            .checked_add(job.dispute_window_secs)
-            .ok_or(ErrorCode::MathOverflow)?;
-        require!(
-            Clock::get()?.unix_timestamp < closes_at,
-            ErrorCode::WindowClosed
-        );
+        match job.status {
+            JobStatus::VerdictProposed => {
+                let closes_at = job
+                    .verdict_proposed_at
+                    .checked_add(job.dispute_window_secs)
+                    .ok_or(ErrorCode::MathOverflow)?;
+                require!(now < closes_at, ErrorCode::WindowClosed);
+            }
+            JobStatus::Submitted => {
+                let timeout_at = job
+                    .submitted_at
+                    .checked_add(job.dispute_window_secs)
+                    .ok_or(ErrorCode::MathOverflow)?;
+                require!(now >= timeout_at, ErrorCode::ReviewNotTimedOut);
+            }
+            _ => return err!(ErrorCode::InvalidStatus),
+        }
 
         job.status = JobStatus::Disputed;
         job.disputed_by = ctx.accounts.signer.key();
@@ -497,6 +508,8 @@ pub struct Job {
     pub deadline: i64,
     pub disputed_by: Pubkey,
     pub bump: u8,
+    /// Set in submit_work. Lets either party escalate if no verdict arrives.
+    pub submitted_at: i64,
     #[max_len(200)]
     pub deliverable_uri: String,
     #[max_len(200)]
@@ -588,6 +601,8 @@ pub enum ErrorCode {
     UriTooLong,
     #[msg("Verdict must be 1 (pass), 2 (fail) or 3 (inconclusive), score 0-100")]
     InvalidVerdict,
+    #[msg("No verdict yet, but the review timeout has not passed")]
+    ReviewNotTimedOut,
     #[msg("Escrow balance too low")]
     InsufficientEscrow,
     #[msg("Arithmetic overflow")]
