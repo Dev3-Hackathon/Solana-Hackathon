@@ -1,123 +1,253 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { createInitialMockRecords, JobRecord } from "../mock";
+import { BN, Idl } from "@coral-xyz/anchor";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import { JobRecord, JobStatus, Verdict } from "../types";
+import { SEED_JOBS } from "../lib/mockJobs";
+import { postJobSpec, linkJobSpec } from "../lib/api";
+import { useProgram } from "../hooks/useProgram";
 import { DEMO_WALLETS } from "./SessionContext";
+
+// Once Helya drops escrow.json into frontend/src/idl/escrow.json, uncomment:
+// import escrowIdl from "../idl/escrow.json";
+const ESCROW_IDL: Idl | null = null;
 
 interface JobsContextValue {
   records: JobRecord[];
   isLoaded: boolean;
-  createJob: (title: string, description: string, amountSol: number) => JobRecord;
-  submitWork: (pda: string, deliverableUri: string) => void;
+  isLiveChain: boolean;
+  getJobByPda: (pda: string) => JobRecord | undefined;
+  createJob: (
+    title: string,
+    description: string,
+    amountSol: number,
+    sellerAddress?: string
+  ) => Promise<JobRecord>;
+  submitWork: (pda: string, deliverableUrl: string) => void;
+  recordVerdict: (pda: string, verdict: Verdict, nextStatus?: JobStatus) => void;
   approveJob: (pda: string) => void;
-  disputeJob: (pda: string, disputedByWallet: string) => void;
-  resolveDispute: (pda: string, releaseToSeller: boolean) => void;
+  disputeJob: (pda: string, reason?: string) => void;
+  resolveDispute: (pda: string, clientBps: number) => void;
+  resetDemoData: () => void;
 }
 
-const JobsContext = createContext<JobsContextValue | null>(null);
+const JobsContext = createContext<JobsContextValue | undefined>(undefined);
+
+const STORAGE_KEY = "proofpay_jobs_v1";
+
+function to32ByteArray(specHash: number[] | string): number[] {
+  if (Array.isArray(specHash)) {
+    if (specHash.length !== 32) {
+      throw new Error(`Invalid specHash length: expected 32 bytes, got ${specHash.length}`);
+    }
+    return specHash;
+  }
+  const cleanHex = specHash.startsWith("0x") ? specHash.slice(2) : specHash;
+  const buf = Buffer.from(cleanHex, "hex");
+  if (buf.length !== 32) {
+    throw new Error(`Invalid hex specHash length: expected 32 bytes, got ${buf.length}`);
+  }
+  return Array.from(buf);
+}
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
+  const { publicKey } = useWallet();
+  const { program, isReady, deriveJobPda, deriveVaultPda } = useProgram(ESCROW_IDL);
+
   const [records, setRecords] = useState<JobRecord[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const nowSecs = Math.floor(Date.now() / 1000);
-    setRecords(createInitialMockRecords(nowSecs));
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as JobRecord[];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRecords(parsed);
+          setIsLoaded(true);
+          return;
+        }
+      }
+    } catch {
+      // Fallback to seed jobs
+    }
+    setRecords(SEED_JOBS);
     setIsLoaded(true);
   }, []);
 
-  const createJob = (title: string, description: string, amountSol: number): JobRecord => {
-    const nowSecs = Math.floor(Date.now() / 1000);
-    const nextId = 100 + records.length + 1;
+  useEffect(() => {
+    if (isLoaded) {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+    }
+  }, [records, isLoaded]);
+
+  const getJobByPda = (pda: string) => records.find((r) => r.pda === pda);
+
+  const createJob = async (
+    title: string,
+    description: string,
+    amountSol: number,
+    sellerAddress: string = DEMO_WALLETS.seller
+  ): Promise<JobRecord> => {
+    const nextId =
+      records.reduce((max, r) => Math.max(max, Number(r.job.jobId) || 0), 100) + 1;
+    const now = Math.floor(Date.now() / 1000);
+    const lamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+
+    // LIVE ON-CHAIN PATH (Active once ESCROW_IDL is provided and wallet is connected)
+    if (isReady && program && publicKey) {
+      // 1. Post written spec to backend to obtain canonical specHash
+      const { specId, specHash } = await postJobSpec({
+        title,
+        description,
+        criteria: [description],
+      });
+      const specHashBytes = to32ByteArray(specHash);
+
+      // 2. Derive PDAs and send create_job transaction from user's wallet
+      const jobIdBn = new BN(nextId);
+      const [jobPda] = deriveJobPda(publicKey, jobIdBn);
+      const [vaultPda] = deriveVaultPda(jobPda);
+      const freelancerPubkey = new PublicKey(sellerAddress);
+
+      await (program.methods as Record<string, (...args: unknown[]) => {
+        accounts: (accs: Record<string, PublicKey>) => { rpc: () => Promise<string> };
+      }>)
+        .createJob(jobIdBn, new BN(lamports), specHashBytes)
+        .accounts({
+          client: publicKey,
+          freelancer: freelancerPubkey,
+          job: jobPda,
+          vault: vaultPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      // 3. Link uploaded spec to confirmed on-chain jobPda (expects { verified: true })
+      await linkJobSpec(jobPda.toBase58(), { specId, specHash });
+
+      const newRecord: JobRecord = {
+        pda: jobPda.toBase58(),
+        title,
+        description,
+        job: {
+          jobId: String(nextId),
+          client: publicKey.toBase58(),
+          freelancer: freelancerPubkey.toBase58(),
+          amount: lamports,
+          status: "Funded",
+          specHash: specHashBytes,
+          deliverableUrl: "",
+          submittedAt: 0,
+          disputedAt: 0,
+        },
+      };
+
+      setRecords((prev) => [newRecord, ...prev]);
+      return newRecord;
+    }
+
+    // MOCK FALLBACK PATH (Used while awaiting Helya's IDL)
+    const pda = `JobPda${nextId}Mock111111111111111111111111111111`;
     const newRecord: JobRecord = {
-      pda: `JobPDA${nextId}11111111111111111111111111111111111`,
+      pda,
       title,
       description,
-      verdict: null,
       job: {
-        jobId: nextId,
-        client: DEMO_WALLETS.client,
-        freelancer: DEMO_WALLETS.seller,
-        arbiter: "Arbiter33333333333333333333333333333333333333",
-        admin: DEMO_WALLETS.admin,
-        amount: Math.round(amountSol * 1_000_000_000),
-        specHash: [1, 2, 3, 4],
-        deliverableUri: "",
-        deliverableHash: [],
-        status: "Accepted",
-        verdict: 0,
-        verdictScore: 0,
-        verdictUri: "",
-        verdictProposedAt: 0,
-        disputeWindowSecs: Number(process.env.NEXT_PUBLIC_DEMO_WINDOW_SECS ?? 180),
-        deadline: nowSecs + 86400,
-        disputedBy: "",
-        bump: 250,
+        jobId: String(nextId),
+        client: publicKey ? publicKey.toBase58() : DEMO_WALLETS.client,
+        freelancer: sellerAddress,
+        amount: lamports,
+        status: "Funded",
+        specHash: new Array(32).fill(nextId % 255),
+        deliverableUrl: "",
         submittedAt: 0,
+        disputedAt: 0,
       },
     };
     setRecords((prev) => [newRecord, ...prev]);
     return newRecord;
   };
 
-  const submitWork = (pda: string, deliverableUri: string) => {
-    const nowSecs = Math.floor(Date.now() / 1000);
+  const submitWork = (pda: string, deliverableUrl: string) => {
+    const now = Math.floor(Date.now() / 1000);
     setRecords((prev) =>
-      prev.map((rec) =>
-        rec.pda === pda
+      prev.map((r) =>
+        r.pda === pda
           ? {
-              ...rec,
+              ...r,
               job: {
-                ...rec.job,
-                deliverableUri,
+                ...r.job,
                 status: "Submitted",
-                submittedAt: nowSecs,
+                deliverableUrl,
+                submittedAt: now,
               },
             }
-          : rec
+          : r
       )
+    );
+  };
+
+  const recordVerdict = (pda: string, verdict: Verdict, nextStatus?: JobStatus) => {
+    setRecords((prev) =>
+      prev.map((r) => {
+        if (r.pda !== pda) return r;
+        const resolvedStatus: JobStatus =
+          nextStatus ?? (verdict.verdict === "inconclusive" ? "Disputed" : "Submitted");
+        return {
+          ...r,
+          verdict,
+          job: {
+            ...r.job,
+            status: resolvedStatus,
+            disputedAt:
+              resolvedStatus === "Disputed"
+                ? Math.floor(Date.now() / 1000)
+                : r.job.disputedAt,
+          },
+        };
+      })
     );
   };
 
   const approveJob = (pda: string) => {
     setRecords((prev) =>
-      prev.map((rec) =>
-        rec.pda === pda ? { ...rec, job: { ...rec.job, status: "Released" } } : rec
+      prev.map((r) =>
+        r.pda === pda ? { ...r, job: { ...r.job, status: "Released" } } : r
       )
     );
   };
 
-  const disputeJob = (pda: string, disputedByWallet: string) => {
+  const disputeJob = (pda: string, reason?: string) => {
+    const now = Math.floor(Date.now() / 1000);
     setRecords((prev) =>
-      prev.map((rec) =>
-        rec.pda === pda
+      prev.map((r) =>
+        r.pda === pda
           ? {
-              ...rec,
-              job: {
-                ...rec.job,
-                status: "Disputed",
-                disputedBy: disputedByWallet,
-              },
+              ...r,
+              disputeReason: reason || "Manual dispute raised",
+              job: { ...r.job, status: "Disputed", disputedAt: now },
             }
-          : rec
+          : r
       )
     );
   };
 
-  const resolveDispute = (pda: string, releaseToSeller: boolean) => {
+  const resolveDispute = (pda: string, clientBps: number) => {
+    const status: JobStatus =
+      clientBps === 10000 ? "Refunded" : clientBps === 0 ? "Released" : "Resolved";
     setRecords((prev) =>
-      prev.map((rec) =>
-        rec.pda === pda
-          ? {
-              ...rec,
-              job: {
-                ...rec.job,
-                status: releaseToSeller ? "Released" : "Refunded",
-              },
-            }
-          : rec
+      prev.map((r) =>
+        r.pda === pda ? { ...r, job: { ...r.job, status } } : r
       )
     );
+  };
+
+  const resetDemoData = () => {
+    window.localStorage.removeItem(STORAGE_KEY);
+    setRecords(SEED_JOBS);
   };
 
   return (
@@ -125,11 +255,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       value={{
         records,
         isLoaded,
+        isLiveChain: isReady,
+        getJobByPda,
         createJob,
         submitWork,
+        recordVerdict,
         approveJob,
         disputeJob,
         resolveDispute,
+        resetDemoData,
       }}
     >
       {children}
@@ -139,6 +273,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
 export function useJobs() {
   const ctx = useContext(JobsContext);
-  if (!ctx) throw new Error("useJobs must be used inside JobsProvider");
+  if (!ctx) {
+    throw new Error("useJobs must be used inside JobsProvider");
+  }
   return ctx;
 }

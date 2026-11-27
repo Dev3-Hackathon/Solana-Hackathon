@@ -1,62 +1,76 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { useWallet } from "@solana/wallet-adapter-react";
 
 export type UserRole = "client" | "seller" | "admin";
 
 export const DEMO_WALLETS: Record<UserRole, string> = {
-  client: "Client1111111111111111111111111111111111111",
-  seller: "Freelancer222222222222222222222222222222222",
-  admin: "Admin4444444444444444444444444444444444444444",
+  client: "CliEnt1111111111111111111111111111111111111",
+  seller: "SeLLer2222222222222222222222222222222222222",
+  admin: "AdmIn33333333333333333333333333333333333333",
 };
 
 interface SessionContextValue {
   role: UserRole | null;
   walletAddress: string | null;
-  isReady: boolean;
+  isWalletConnected: boolean;
   loginAsDemo: (role: UserRole) => void;
+  setRole: (role: UserRole) => void;
   logout: () => void;
 }
 
-const SessionContext = createContext<SessionContextValue>({
-  role: null,
-  walletAddress: null,
-  isReady: false,
-  loginAsDemo: () => {},
-  logout: () => {},
-});
+const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
 const STORAGE_KEY = "proofpay_demo_role";
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
-  const [role, setRole] = useState<UserRole | null>(null);
-  const [isReady, setIsReady] = useState(false);
+  const { publicKey, connected, disconnect } = useWallet();
+  const [role, setRoleState] = useState<UserRole | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY) as UserRole | null;
     if (saved && saved in DEMO_WALLETS) {
-      setRole(saved);
+      setRoleState(saved);
     }
-    setIsReady(true);
   }, []);
 
-  const loginAsDemo = (nextRole: UserRole) => {
+  // Default to "client" role automatically if a browser wallet connects with no role selected yet
+  useEffect(() => {
+    if (connected && publicKey && !role) {
+      setRoleState("client");
+      window.localStorage.setItem(STORAGE_KEY, "client");
+    }
+  }, [connected, publicKey, role]);
+
+  const setRole = (nextRole: UserRole) => {
+    setRoleState(nextRole);
     window.localStorage.setItem(STORAGE_KEY, nextRole);
+  };
+
+  const loginAsDemo = (nextRole: UserRole) => {
     setRole(nextRole);
   };
 
   const logout = () => {
+    setRoleState(null);
     window.localStorage.removeItem(STORAGE_KEY);
-    setRole(null);
+    if (connected) {
+      disconnect().catch(() => {});
+    }
   };
+
+  const connectedAddress = publicKey ? publicKey.toBase58() : null;
+  const walletAddress = connectedAddress ?? (role ? DEMO_WALLETS[role] : null);
 
   return (
     <SessionContext.Provider
       value={{
         role,
-        walletAddress: role ? DEMO_WALLETS[role] : null,
-        isReady,
+        walletAddress,
+        isWalletConnected: Boolean(connectedAddress),
         loginAsDemo,
+        setRole,
         logout,
       }}
     >
@@ -66,5 +80,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function useSession() {
-  return useContext(SessionContext);
+  const ctx = useContext(SessionContext);
+  if (!ctx) {
+    throw new Error("useSession must be used inside SessionProvider");
+  }
+  return ctx;
 }
