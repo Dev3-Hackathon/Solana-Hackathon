@@ -11,3 +11,5 @@ test-ledger
 .env
 keys/
 data/
+node_modules/.env.local
+.env.*.local
