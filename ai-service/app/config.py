@@ -16,7 +16,8 @@ class Settings:
         ).split(",")
         if m.strip()
     )
-    primary_timeout_secs: float = float(os.getenv("PRIMARY_TIMEOUT_SECS", "10"))
-    fallback_timeout_secs: float = float(os.getenv("FALLBACK_TIMEOUT_SECS", "8"))
+    primary_timeout_secs: float = float(os.getenv("PRIMARY_TIMEOUT_SECS", "12"))
+    fallback_timeout_secs: float = float(os.getenv("FALLBACK_TIMEOUT_SECS", "10"))
+    evaluate_timeout_secs: float = float(os.getenv("EVALUATE_TIMEOUT_SECS", "45"))
     mock_llm: bool = os.getenv("MOCK_LLM", "0") == "1"
     min_content_length: int = 10

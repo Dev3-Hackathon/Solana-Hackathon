@@ -58,16 +58,24 @@ class GeminiProvider(LLMProvider):
     def generate_verdict_json(
         self, system_prompt: str, user_prompt: str, criteria: list[str]
     ) -> str:
+        if self._timeout_secs is None:
+            try:
+                return self._invoke(system_prompt, user_prompt)
+            except Exception as exc:
+                raise ProviderError(f"{self._model} API error: {exc}") from exc
+
+        pool = ThreadPoolExecutor(max_workers=1)
         try:
-            if self._timeout_secs is not None:
-                with ThreadPoolExecutor(max_workers=1) as pool:
-                    future = pool.submit(self._invoke, system_prompt, user_prompt)
-                    return future.result(timeout=self._timeout_secs)
-            return self._invoke(system_prompt, user_prompt)
+            future = pool.submit(self._invoke, system_prompt, user_prompt)
+            return future.result(timeout=self._timeout_secs)
         except FuturesTimeoutError as exc:
-            raise ProviderError(f"{self._model} timed out after {self._timeout_secs}s") from exc
+            raise ProviderTimeoutError(
+                f"{self._model} timed out after {self._timeout_secs}s"
+            ) from exc
         except Exception as exc:
             raise ProviderError(f"{self._model} API error: {exc}") from exc
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
 
 class MockProvider(LLMProvider):
@@ -97,3 +105,9 @@ class MockProvider(LLMProvider):
             "risks": [],
         }
         return json.dumps(payload)
+
+class ProviderError(Exception):
+    """Raised when an LLM provider fails or times out."""
+
+class ProviderTimeoutError(ProviderError):
+    """Raised when an LLM provider exeeds its timeout."""

@@ -25,12 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             seen.add(model_name)
 
-            if idx == 0:
-                timeout_secs = cfg.primary_timeout_secs
-            elif idx < len(cfg.llm_models) - 1:
-                timeout_secs = cfg.fallback_timeout_secs
-            else:
-                timeout_secs = None
+            timeout_secs = (
+                cfg.primary_timeout_secs if idx == 0 else cfg.fallback_timeout_secs
+            )
 
             providers.append(
                 GeminiProvider(
@@ -46,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             validator=VerdictValidator(),
             min_content_length=cfg.min_content_length,
             skip_length_guard=cfg.mock_llm,
+            total_timeout_secs=cfg.evaluate_timeout_secs,
         )
         if providers
         else None
