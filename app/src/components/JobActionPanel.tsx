@@ -1,79 +1,132 @@
+
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useState } from 'react';
+import type { Job } from '@/types';
+import CountdownTimer from './CountdownTimer';
 
-interface CountdownTimerProps {
-    targetTimestampSecs: number;
-    onTimeout: () => void;
-    expiredText?: string;
+interface JobActionPanelProps {
+    job: Job;
+    currentWallet: string;
+    onDispute: () => void;
+    onApprove: () => void;
+    onRetryAI: () => void;
 }
 
-export default function CountdownTimer({
-    targetTimestampSecs,
-    onTimeout,
-    expiredText = "Time's up!"
-}: CountdownTimerProps) {
-    const [timeLeft, setTimeLeft] = useState<number>(0);
-    const [isExpired, setIsExpired] = useState<boolean>(false);
+export default function JobActionPanel({
+    job,
+    currentWallet,
+    onDispute,
+    onApprove,
+    onRetryAI
+}: JobActionPanelProps) {
+    const [isTimeoutReached, setIsTimeoutReached] = useState(false);
+    const [isDisputeWindowClosed, setIsDisputeWindowClosed] = useState(false);
 
-    const onTimeoutRef = useRef(onTimeout);
-    const hasTriggeredRef = useRef(false);
+    const reviewTimeoutSecs = parseInt(
+        process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS || '300',
+        10
+    );
 
-    useEffect(() => {
-        onTimeoutRef.current = onTimeout;
-    }, [onTimeout]);
+    const timeoutTarget = job.submittedAt + reviewTimeoutSecs;
 
-    useEffect(() => {
-        hasTriggeredRef.current = false;
-        setIsExpired(false);
+    const isClient = currentWallet === job.client;
+    const isFreelancer = currentWallet === job.freelancer;
+    const canAct = isClient || isFreelancer;
 
-        const calculateTimeLeft = () => {
-            const nowSecs = Math.floor(Date.now() / 1000);
-            const diff = targetTimestampSecs - nowSecs;
+    if (job.status === 'Submitted') {
+        return (
+            <div className="p-4 border border-yellow-300 bg-yellow-50 rounded-lg space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-yellow-800">
+                        Waiting for AI review
+                    </h3>
 
-            if (diff <= 0) {
-                setTimeLeft(0);
-                setIsExpired(true);
+                    {!isTimeoutReached && (
+                        <div className="text-sm text-gray-600">
+                            Auto-dispute available in:{' '}
+                            <CountdownTimer
+                                targetTimestampSecs={timeoutTarget}
+                                onTimeout={() => setIsTimeoutReached(true)}
+                            />
+                        </div>
+                    )}
+                </div>
 
-                if (!hasTriggeredRef.current) {
-                    hasTriggeredRef.current = true;
-                    onTimeoutRef.current();
-                }
+                {canAct && (
+                    <div className="flex flex-wrap gap-3">
+                        {isClient && (
+                            <button
+                                onClick={onApprove}
+                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition"
+                            >
+                                Approve
+                            </button>
+                        )}
 
-                return true;
-            }
+                        {isFreelancer && (
+                            <button
+                                onClick={onRetryAI}
+                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
+                            >
+                                Retry AI review
+                            </button>
+                        )}
 
-            setTimeLeft(diff);
-            return false;
-        };
-
-        const alreadyExpired = calculateTimeLeft();
-
-        if (alreadyExpired) {
-            return;
-        }
-
-        const timer = setInterval(() => {
-            const expired = calculateTimeLeft();
-
-            if (expired) {
-                clearInterval(timer);
-            }
-        }, 1000);
-
-        return () => clearInterval(timer);
-    }, [targetTimestampSecs]);
-
-    if (isExpired) {
-        return <span className="text-red-600 font-bold">{expiredText}</span>;
+                        {isTimeoutReached && (
+                            <button
+                                onClick={onDispute}
+                                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition font-bold animate-pulse"
+                            >
+                                Dispute (no verdict yet)
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
     }
 
-    const minutes = Math.floor(timeLeft / 60);
-    const seconds = timeLeft % 60;
+    if (job.status === 'VerdictProposed') {
+        const disputeDeadline =
+            job.verdictProposedAt + job.disputeWindowSecs;
+
+        return (
+            <div className="p-4 border border-orange-300 bg-orange-50 rounded-lg space-y-4">
+                <div className="flex items-center justify-between">
+                    <h3 className="font-semibold text-orange-800">
+                        AI verdict posted. You can dispute until the window closes.
+                    </h3>
+
+                    <div className="text-sm text-gray-600">
+                        Time left to dispute:{' '}
+                        <CountdownTimer
+                            targetTimestampSecs={disputeDeadline}
+                            onTimeout={() => setIsDisputeWindowClosed(true)}
+                            expiredText="Dispute window closed"
+                        />
+                    </div>
+                </div>
+
+                {canAct && !isDisputeWindowClosed && (
+                    <div className="flex gap-3">
+                        <button
+                            onClick={onDispute}
+                            className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition"
+                        >
+                            Dispute Verdict
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
-        <span className="font-mono text-blue-600 font-semibold">
-            {minutes}:{seconds.toString().padStart(2, '0')}
-        </span>
+        <div className="p-4 border border-gray-200 bg-gray-50 rounded-lg">
+            <p className="text-gray-500">
+                No actions available for status: {job.status}
+            </p>
+        </div>
     );
 }
