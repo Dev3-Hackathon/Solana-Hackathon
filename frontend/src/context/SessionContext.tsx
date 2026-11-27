@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { usePollar } from "@pollar/react";
 
 export type UserRole = "client" | "seller" | "admin";
 
@@ -16,6 +17,7 @@ interface SessionContextValue {
   walletAddress: string | null;
   isReady: boolean;
   isWalletConnected: boolean;
+  isPollarConnected: boolean;
   loginAsDemo: (role: UserRole) => void;
   setRole: (role: UserRole) => void;
   logout: () => void;
@@ -27,8 +29,22 @@ const STORAGE_KEY = "proofpay_demo_role";
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const { publicKey, connected, disconnect } = useWallet();
+  const {
+    isAuthenticated: isPollarAuthenticated,
+    wallet: pollarWallet,
+    wallets: pollarWallets,
+    logout: pollarLogout,
+  } = usePollar();
+
   const [role, setRoleState] = useState<UserRole | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  const solanaPollarWallet = Array.isArray(pollarWallets)
+    ? pollarWallets.find((w) => w.chain === "SOLANA")
+    : undefined;
+  const pollarAddress = isPollarAuthenticated
+    ? solanaPollarWallet?.address ?? pollarWallet?.address ?? null
+    : null;
 
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY) as UserRole | null;
@@ -39,11 +55,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (connected && publicKey && !role) {
+    if (!isReady) return;
+
+    const hasLiveWallet =
+      Boolean(pollarAddress) || (connected && Boolean(publicKey));
+
+    if (hasLiveWallet && !role) {
       setRoleState("client");
       window.localStorage.setItem(STORAGE_KEY, "client");
     }
-  }, [connected, publicKey, role]);
+  }, [isReady, pollarAddress, connected, publicKey, role]);
 
   const setRole = (nextRole: UserRole) => {
     setRoleState(nextRole);
@@ -57,21 +78,32 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const logout = () => {
     setRoleState(null);
     window.localStorage.removeItem(STORAGE_KEY);
+    if (isPollarAuthenticated) {
+      try {
+        pollarLogout();
+      } catch {
+        // Ignore logout errors during session reset
+      }
+    }
     if (connected) {
       disconnect().catch(() => {});
     }
   };
 
-  const connectedAddress = publicKey ? publicKey.toBase58() : null;
-  const walletAddress = connectedAddress ?? (role ? DEMO_WALLETS[role] : null);
+  const phantomAddress = publicKey ? publicKey.toBase58() : null;
+  const liveAddress = pollarAddress ?? phantomAddress;
+  const walletAddress = isReady
+    ? liveAddress ?? (role ? DEMO_WALLETS[role] : null)
+    : null;
 
   return (
     <SessionContext.Provider
       value={{
-        role,
+        role: isReady ? role : null,
         walletAddress,
         isReady,
-        isWalletConnected: Boolean(connectedAddress),
+        isWalletConnected: isReady ? Boolean(liveAddress) : false,
+        isPollarConnected: isReady ? Boolean(pollarAddress) : false,
         loginAsDemo,
         setRole,
         logout,
