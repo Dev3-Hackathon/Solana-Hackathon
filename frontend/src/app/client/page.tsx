@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
 
-const REVIEW_TIMEOUT_SECS = Number(process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS ?? 300);
 const FALLBACK_SOL_USD = 150;
 
 export default function ClientPortalPage() {
@@ -209,9 +208,11 @@ export default function ClientPortalPage() {
 
         {clientJobs.map((rec) => {
           const nowSecs = Math.floor(Date.now() / 1000);
+          const windowSecs = Number(rec.job.disputeWindowSecs) || 300;
           const isOverdue =
             rec.job.status === "Submitted" &&
-            nowSecs >= rec.job.submittedAt + REVIEW_TIMEOUT_SECS;
+            rec.job.submittedAt > 0 &&
+            nowSecs >= rec.job.submittedAt + windowSecs;
           const jobSol = rec.job.amount / 1_000_000_000;
 
           return (
