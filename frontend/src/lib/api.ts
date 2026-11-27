@@ -188,3 +188,53 @@ export async function estimateJobPrice(payload: {
     rationale: "Estimated from technical scope, stack complexity, and deliverables.",
   };
 }
+
+export type SellerRateTier = "too_low" | "good" | "very_good";
+
+export interface SellerRateAssessment {
+  tier: SellerRateTier;
+  label: "Too Low" | "Good" | "Very Good";
+  estimate: PriceEstimateResponse;
+  deltaPercent: number;
+}
+
+export async function evaluateSellerRate(payload: {
+  title: string;
+  description: string;
+  offeredSol: number;
+}): Promise<SellerRateAssessment> {
+  const estimate = await estimateJobPrice({
+    title: payload.title,
+    description: payload.description,
+  });
+
+  const deltaPercent =
+    estimate.recommendedSol > 0
+      ? Math.round(((payload.offeredSol - estimate.recommendedSol) / estimate.recommendedSol) * 100)
+      : 0;
+
+  if (payload.offeredSol < estimate.minSol) {
+    return {
+      tier: "too_low",
+      label: "Too Low",
+      estimate,
+      deltaPercent,
+    };
+  }
+
+  if (payload.offeredSol >= estimate.recommendedSol * 1.15) {
+    return {
+      tier: "very_good",
+      label: "Very Good",
+      estimate,
+      deltaPercent,
+    };
+  }
+
+  return {
+    tier: "good",
+    label: "Good",
+    estimate,
+    deltaPercent,
+  };
+}
