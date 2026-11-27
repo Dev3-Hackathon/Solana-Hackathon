@@ -1,7 +1,7 @@
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import { env } from "./env";
-import { arbiter } from "./solana";
+import { arbiter, getArbiterBalanceSol } from "./solana";
 import "./db";
 import { HttpError } from "./http";
 import { specsRouter } from "./routes/specs";
@@ -20,12 +20,22 @@ app.get("/api/health", async (_req, res) => {
     });
     if (r.ok) aiService = "up";
   } catch {
-    // AI service not running yet: that's fine for now
+    // AI service not running yet
   }
-  res.json({ ok: true, arbiter: arbiter.publicKey.toBase58(), aiService });
+
+  const arbiterBalanceSol = await getArbiterBalanceSol();
+  if (arbiterBalanceSol !== null && arbiterBalanceSol < 0.05) {
+    console.warn(`[health] Low arbiter balance: ${arbiterBalanceSol} SOL`);
+  }
+
+  res.json({
+    ok: true,
+    arbiter: arbiter.publicKey.toBase58(),
+    arbiterBalanceSol,
+    aiService,
+  });
 });
 
-app.use("/api", specsRouter);
 app.use("/api", specsRouter);
 app.use("/api", reportsRouter);
 app.use("/api", deliverablesRouter);

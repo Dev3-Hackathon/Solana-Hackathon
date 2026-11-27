@@ -44,7 +44,7 @@ const criterionResultSchema = z.object({
 
 const verdictSchema = z.object({
   verdict: z.enum(["pass", "fail", "inconclusive"]),
-  score: z.number().min(0).max(100),
+  score: z.number().int().min(0).max(100),
   criteria: z.array(criterionResultSchema),
   summary: z.string(),
   risks: z.array(z.string()),
@@ -183,5 +183,17 @@ export async function evaluateDeliverable(
     );
   }
 
+  // Defense in depth: the AI service should echo the criteria 1:1 (INTERFACE.md section 5.1).
+  const sent = [...input.criteria].sort();
+  const got = parsed.data.criteria.map((c) => c.criterion).sort();
+  if (got.length !== sent.length || got.some((c, i) => c !== sent[i])) {
+    throw new AiServiceResponseError(
+      res.status,
+      "AI service returned criteria that do not match the request (count or text differs)",
+      body
+    );
+  }
+
   return parsed.data;
+
 }

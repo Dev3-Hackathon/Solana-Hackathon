@@ -213,3 +213,47 @@ test("contract test: matches Hamza's exact HTML request and inconclusive Verdict
   assert.equal(result.criteria[2].evidence, "");
   assert.deepEqual(result.risks, ["incomplete_deliverable"]);
 });
+
+test("evaluateDeliverable throws AiServiceResponseError on unexpected HTTP 500", async () => {
+  const mockFetch: typeof fetch = async () => new Response("boom", { status: 500 });
+  await assert.rejects(
+    () => evaluateDeliverable(sampleRequest, { fetchFn: mockFetch }),
+    (err: unknown) => {
+      assert.ok(err instanceof AiServiceResponseError);
+      assert.equal(err.status, 500);
+      return true;
+    }
+  );
+});
+
+test("evaluateDeliverable throws AiServiceTimeoutError when the network call fails", async () => {
+  const mockFetch: typeof fetch = async () => {
+    throw new TypeError("fetch failed");
+  };
+  await assert.rejects(
+    () => evaluateDeliverable(sampleRequest, { fetchFn: mockFetch }),
+    (err: unknown) => err instanceof AiServiceTimeoutError
+  );
+});
+
+test("evaluateDeliverable rejects a non-integer score", async () => {
+  const bad = { ...sampleVerdict, score: 72.5 };
+  const mockFetch: typeof fetch = async () => new Response(JSON.stringify(bad), { status: 200 });
+  await assert.rejects(
+    () => evaluateDeliverable(sampleRequest, { fetchFn: mockFetch }),
+    (err: unknown) => err instanceof AiServiceResponseError
+  );
+});
+
+test("evaluateDeliverable rejects criteria that do not match the request", async () => {
+  const bad = { ...sampleVerdict, criteria: [sampleVerdict.criteria[0]] }; // one criterion missing
+  const mockFetch: typeof fetch = async () => new Response(JSON.stringify(bad), { status: 200 });
+  await assert.rejects(
+    () => evaluateDeliverable(sampleRequest, { fetchFn: mockFetch }),
+    (err: unknown) => {
+      assert.ok(err instanceof AiServiceResponseError);
+      assert.match(err.message, /do not match the request/);
+      return true;
+    }
+  );
+});

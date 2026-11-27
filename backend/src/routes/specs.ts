@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { specHashHex } from "../hash";
 import { HttpError, parseBody, requirePubkey } from "../http";
+import { getJob } from "../solana";
 
 export const specsRouter = Router();
 
@@ -35,13 +36,13 @@ specsRouter.post("/specs", (req, res) => {
 });
 
 // 3.2  POST /api/jobs/:jobPda/link-spec
-// TODO (Step 6): read the on-chain Job and require job.spec_hash == the spec's hash.
-// Until then the link is NOT verified against the chain, and we say so in the response.
-specsRouter.post("/jobs/:jobPda/link-spec", (req, res) => {
+specsRouter.post("/jobs/:jobPda/link-spec", async (req, res) => {
   const jobPda = requirePubkey(req.params.jobPda);
   const { specId } = parseBody(linkSchema, req.body);
 
-  const spec = db.prepare(`SELECT id FROM specs WHERE id = ?`).get(specId);
+  const spec = db
+    .prepare(`SELECT id, spec_hash FROM specs WHERE id = ?`)
+    .get(specId) as { id: string; spec_hash: string } | undefined;
   if (!spec) throw new HttpError(404, "SPEC_NOT_FOUND", "No spec with that specId");
 
   const existing = db
@@ -51,12 +52,22 @@ specsRouter.post("/jobs/:jobPda/link-spec", (req, res) => {
   if (existing && existing.spec_id !== specId) {
     throw new HttpError(409, "JOB_ALREADY_LINKED", "This job is already linked to a different spec");
   }
+
+  const job = await getJob(jobPda);
+  if (job.specHash !== spec.spec_hash) {
+    throw new HttpError(
+      409,
+      "SPEC_HASH_MISMATCH",
+      `On-chain spec_hash (${job.specHash}) does not match spec ${specId} (${spec.spec_hash})`
+    );
+  }
+
   if (!existing) {
     db.prepare(`INSERT INTO job_specs (job_pda, spec_id) VALUES (?, ?)`).run(jobPda, specId);
   }
 
-  console.warn(`[link-spec] ${jobPda} linked to ${specId} (NOT verified on-chain yet)`);
-  res.json({ ok: true, verified: false });
+  console.log(`[link-spec] ${jobPda} verified and linked to ${specId}`);
+  res.json({ ok: true, verified: true });
 });
 
 // 3.3  GET /api/jobs/:jobPda/spec
