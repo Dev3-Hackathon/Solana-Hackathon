@@ -5,6 +5,7 @@ import { arbiter } from "./solana";
 import "./db";
 import { HttpError } from "./http";
 import { specsRouter } from "./routes/specs";
+import { reportsRouter } from "./routes/reports";
 
 const app = express();
 app.use(cors());
@@ -24,6 +25,8 @@ app.get("/api/health", async (_req, res) => {
 });
 
 app.use("/api", specsRouter);
+app.use("/api", specsRouter);
+app.use("/api", reportsRouter);
 
 // 404 + error handler: all errors use { error, code }
 app.use((_req, res) => {
