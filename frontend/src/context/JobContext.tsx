@@ -25,7 +25,7 @@ interface JobsContextValue {
     amountSol: number,
     sellerAddress?: string
   ) => Promise<JobRecord>;
-  submitWork: (pda: string, deliverableUrl: string) => void;
+  submitWork: (pda: string, deliverableUri: string) => void;
   recordVerdict: (pda: string, verdict: Verdict, nextStatus?: JobStatus) => void;
   approveJob: (pda: string) => void;
   disputeJob: (pda: string, reason?: string) => void;
@@ -98,7 +98,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
     // LIVE ON-CHAIN PATH (Active once ESCROW_IDL is provided and wallet is connected)
     if (isReady && program && publicKey) {
-      // 1. Post written spec to backend to obtain canonical specHash
       const { specId, specHash } = await postJobSpec({
         title,
         description,
@@ -106,7 +105,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       });
       const specHashBytes = to32ByteArray(specHash);
 
-      // 2. Derive PDAs and send create_job transaction from user's wallet
       const jobIdBn = new BN(nextId);
       const [jobPda] = deriveJobPda(publicKey, jobIdBn);
       const [vaultPda] = deriveVaultPda(jobPda);
@@ -125,7 +123,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         })
         .rpc();
 
-      // 3. Link uploaded spec to confirmed on-chain jobPda (expects { verified: true })
       await linkJobSpec(jobPda.toBase58(), { specId, specHash });
 
       const newRecord: JobRecord = {
@@ -133,15 +130,25 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         title,
         description,
         job: {
-          jobId: String(nextId),
+          jobId: nextId,
           client: publicKey.toBase58(),
           freelancer: freelancerPubkey.toBase58(),
+          arbiter: "ArbIter444444444444444444444444444444444444",
+          admin: DEMO_WALLETS.admin,
           amount: lamports,
-          status: "Funded",
           specHash: specHashBytes,
-          deliverableUrl: "",
+          deliverableUri: "",
+          deliverableHash: new Array(32).fill(0),
+          status: "Funded",
+          verdict: 0,
+          verdictScore: 0,
+          verdictUri: "",
+          verdictProposedAt: 0,
+          disputeWindowSecs: 300,
+          deadline: now + 86400,
+          disputedBy: "",
+          bump: 255,
           submittedAt: 0,
-          disputedAt: 0,
         },
       };
 
@@ -156,22 +163,32 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       title,
       description,
       job: {
-        jobId: String(nextId),
+        jobId: nextId,
         client: publicKey ? publicKey.toBase58() : DEMO_WALLETS.client,
         freelancer: sellerAddress,
+        arbiter: "ArbIter444444444444444444444444444444444444",
+        admin: DEMO_WALLETS.admin,
         amount: lamports,
-        status: "Funded",
         specHash: new Array(32).fill(nextId % 255),
-        deliverableUrl: "",
+        deliverableUri: "",
+        deliverableHash: new Array(32).fill(0),
+        status: "Funded",
+        verdict: 0,
+        verdictScore: 0,
+        verdictUri: "",
+        verdictProposedAt: 0,
+        disputeWindowSecs: 300,
+        deadline: now + 86400,
+        disputedBy: "",
+        bump: 255,
         submittedAt: 0,
-        disputedAt: 0,
       },
     };
     setRecords((prev) => [newRecord, ...prev]);
     return newRecord;
   };
 
-  const submitWork = (pda: string, deliverableUrl: string) => {
+  const submitWork = (pda: string, deliverableUri: string) => {
     const now = Math.floor(Date.now() / 1000);
     setRecords((prev) =>
       prev.map((r) =>
@@ -181,7 +198,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
               job: {
                 ...r.job,
                 status: "Submitted",
-                deliverableUrl,
+                deliverableUri,
                 submittedAt: now,
               },
             }
@@ -191,6 +208,10 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const recordVerdict = (pda: string, verdict: Verdict, nextStatus?: JobStatus) => {
+    const now = Math.floor(Date.now() / 1000);
+    const verdictCode =
+      verdict.verdict === "pass" ? 1 : verdict.verdict === "fail" ? 2 : 3;
+
     setRecords((prev) =>
       prev.map((r) => {
         if (r.pda !== pda) return r;
@@ -202,10 +223,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           job: {
             ...r.job,
             status: resolvedStatus,
-            disputedAt:
-              resolvedStatus === "Disputed"
-                ? Math.floor(Date.now() / 1000)
-                : r.job.disputedAt,
+            verdict: verdictCode,
+            verdictScore: verdict.score,
+            verdictProposedAt: now,
           },
         };
       })
@@ -221,14 +241,17 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   };
 
   const disputeJob = (pda: string, reason?: string) => {
-    const now = Math.floor(Date.now() / 1000);
     setRecords((prev) =>
       prev.map((r) =>
         r.pda === pda
           ? {
               ...r,
               disputeReason: reason || "Manual dispute raised",
-              job: { ...r.job, status: "Disputed", disputedAt: now },
+              job: {
+                ...r.job,
+                status: "Disputed",
+                disputedBy: r.job.client,
+              },
             }
           : r
       )

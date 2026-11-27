@@ -1,17 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useJobs } from "../../../context/JobContext";
 import { useSession } from "../../../context/SessionContext";
-import { triggerJobEvaluation } from "../../../lib/api";
+import { fetchJobReport, triggerJobEvaluation } from "../../../lib/api";
 import { Verdict } from "../../../types";
 
 const REVIEW_TIMEOUT_SECS = Number(process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS ?? 300);
 const FALLBACK_SOL_USD = 150;
 
-export default function JobDetailPage() {
+function JobDetailContent() {
   const params = useParams<{ pda: string }>();
   const pda = params?.pda ?? "";
 
@@ -26,9 +26,9 @@ export default function JobDetailPage() {
   } = useJobs();
   const { role, loginAsDemo } = useSession();
 
-  const [deliverableUrl, setDeliverableUrl] = useState("");
+  const [deliverableUri, setDeliverableUri] = useState("");
   const [disputeReason, setDisputeReason] = useState("");
-  const [clientBps, setClientBps] = useState<number>(5000); // 50/50 default split
+  const [clientBps, setClientBps] = useState<number>(5000);
 
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evalError, setEvalError] = useState<{
@@ -39,7 +39,6 @@ export default function JobDetailPage() {
   const [nowSecs, setNowSecs] = useState(() => Math.floor(Date.now() / 1000));
   const [solUsdRate, setSolUsdRate] = useState<number>(FALLBACK_SOL_USD);
 
-  // Live 1s clock for review timeout countdown
   useEffect(() => {
     const timer = setInterval(() => {
       setNowSecs(Math.floor(Date.now() / 1000));
@@ -47,7 +46,6 @@ export default function JobDetailPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Live SOL/USD price
   useEffect(() => {
     let active = true;
     fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd")
@@ -90,9 +88,9 @@ export default function JobDetailPage() {
 
   const handleSubmitWork = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!deliverableUrl.trim()) return;
-    submitWork(pda, deliverableUrl.trim());
-    setDeliverableUrl("");
+    if (!deliverableUri.trim()) return;
+    submitWork(pda, deliverableUri.trim());
+    setDeliverableUri("");
   };
 
   const handleRunAiEvaluation = async () => {
@@ -101,24 +99,23 @@ export default function JobDetailPage() {
     setEvalError(null);
 
     try {
-      const res = await triggerJobEvaluation(pda, {
-        deliverableUrl: job.deliverableUrl,
-        description,
-      });
+      await triggerJobEvaluation(pda);
+      const report = await fetchJobReport(pda);
 
-      const parsedVerdict: Verdict = res?.verdict ?? {
-        verdict: "pass",
-        confidence: 0.94,
-        summary: "Deliverable satisfies all hashed acceptance criteria.",
-        criteriaBreakdown: [
-          { criterion: description, passed: true, notes: "Verified against submission URL." },
-        ],
-      };
+      if (report.isTimeout || !report.data) {
+        setEvalError({
+          message:
+            report.message ||
+            "Review window expired (404 REPORT_NOT_FOUND). Manual dispute resolution is now unlocked.",
+          isTimeout404: true,
+        });
+        return;
+      }
 
       recordVerdict(
         pda,
-        parsedVerdict,
-        parsedVerdict.verdict === "inconclusive" ? "Disputed" : "Submitted"
+        report.data,
+        report.data.verdict === "inconclusive" ? "Disputed" : "Submitted"
       );
     } catch (err: unknown) {
       const message =
@@ -136,25 +133,26 @@ export default function JobDetailPage() {
     }
   };
 
-  // Mock AI verdict helper so you can test Pass / Fail / Inconclusive offline without backend
   const handleSimulateOfflineVerdict = (outcome: "pass" | "fail" | "inconclusive") => {
     setEvalError(null);
     const mockVerdict: Verdict = {
       verdict: outcome,
-      confidence: outcome === "inconclusive" ? 0.48 : 0.92,
+      score: outcome === "pass" ? 94 : outcome === "fail" ? 32 : 48,
       summary:
         outcome === "pass"
           ? "All acceptance criteria verified successfully."
           : outcome === "fail"
           ? "Submitted deliverable misses required test coverage and latency thresholds."
           : "AI confidence below threshold — escalated to Admin arbitration.",
-      criteriaBreakdown: [
+      criteria: [
         {
           criterion: description,
-          passed: outcome === "pass",
-          notes: `Simulated ${outcome.toUpperCase()} evaluation`,
+          met: outcome === "pass" ? true : outcome === "fail" ? false : null,
+          evidence: `Simulated ${outcome.toUpperCase()} evaluation`,
+          confidence: outcome === "inconclusive" ? 0.48 : 0.94,
         },
       ],
+      risks: outcome === "pass" ? [] : ["Requires manual reviewer inspection"],
     };
     recordVerdict(pda, mockVerdict, outcome === "inconclusive" ? "Disputed" : "Submitted");
   };
@@ -241,16 +239,16 @@ export default function JobDetailPage() {
           </div>
         </div>
 
-        {job.deliverableUrl && (
+        {job.deliverableUri && (
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
             <span className="font-semibold text-slate-700">Submitted Deliverable: </span>
             <a
-              href={job.deliverableUrl}
+              href={job.deliverableUri}
               target="_blank"
               rel="noreferrer"
               className="font-mono text-indigo-600 underline break-all"
             >
-              {job.deliverableUrl}
+              {job.deliverableUri}
             </a>
             {job.status === "Submitted" && (
               <span className="ml-3 text-slate-500">
@@ -280,8 +278,8 @@ export default function JobDetailPage() {
               type="url"
               required
               placeholder="https://github.com/org/repo/pull/42"
-              value={deliverableUrl}
-              onChange={(e) => setDeliverableUrl(e.target.value)}
+              value={deliverableUri}
+              onChange={(e) => setDeliverableUri(e.target.value)}
               className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
             />
             <button
@@ -295,7 +293,9 @@ export default function JobDetailPage() {
       )}
 
       {/* 2. AI ARBITRATION VERDICT & RETRYABLE EVALUATION */}
-      {["Submitted", "Disputed", "Released", "Refunded", "Resolved"].includes(job.status) && (
+      {["Submitted", "VerdictProposed", "Disputed", "Released", "Refunded", "Resolved"].includes(
+        job.status
+      ) && (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -325,7 +325,6 @@ export default function JobDetailPage() {
             )}
           </div>
 
-          {/* Retryable 502 or 404 Timeout Error Banner */}
           {evalError && (
             <div
               className={`flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 text-xs ${
@@ -347,7 +346,6 @@ export default function JobDetailPage() {
             </div>
           )}
 
-          {/* Offline Verdict Simulator for Demo Testing */}
           {job.status === "Submitted" && !verdict && (
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3 text-xs">
               <span className="font-medium text-slate-600">Offline Demo Simulate:</span>
@@ -375,7 +373,6 @@ export default function JobDetailPage() {
             </div>
           )}
 
-          {/* Recorded Verdict Display */}
           {verdict && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-2">
               <div className="flex items-center justify-between">
@@ -391,7 +388,7 @@ export default function JobDetailPage() {
                   Verdict: {verdict.verdict}
                 </span>
                 <span className="text-xs font-medium text-slate-500 tabular-nums">
-                  Confidence: {(verdict.confidence * 100).toFixed(0)}%
+                  Score: {verdict.score}/100
                 </span>
               </div>
               <p className="text-sm text-slate-800">{verdict.summary}</p>
@@ -401,9 +398,8 @@ export default function JobDetailPage() {
       )}
 
       {/* 3. CLIENT ACTIONS: Approve & Release OR Raise Dispute */}
-      {job.status === "Submitted" && (
+      {["Submitted", "VerdictProposed"].includes(job.status) && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {/* Approve & Release */}
           <div className="rounded-xl border border-emerald-200 bg-white p-5 shadow-xs space-y-3">
             <h3 className="text-sm font-semibold text-slate-900">
               Client Action: Approve &amp; Release Funds
@@ -420,7 +416,6 @@ export default function JobDetailPage() {
             </button>
           </div>
 
-          {/* Raise Manual Dispute (Unlocked on Fail verdict, Overdue timeout, or 404 REPORT_NOT_FOUND) */}
           <div className="rounded-xl border border-red-200 bg-white p-5 shadow-xs space-y-3">
             <h3 className="text-sm font-semibold text-slate-900">
               Raise Escrow Dispute
@@ -509,5 +504,13 @@ export default function JobDetailPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function JobDetailPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-slate-500">Loading contract details...</div>}>
+      <JobDetailContent />
+    </Suspense>
   );
 }

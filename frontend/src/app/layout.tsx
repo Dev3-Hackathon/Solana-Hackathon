@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import { WalletContextProvider } from "../context/WalletContextProvider";
 import { SessionProvider } from "../context/SessionContext";
@@ -21,7 +22,9 @@ export default function RootLayout({
         <WalletContextProvider>
           <SessionProvider>
             <JobsProvider>
-              <Navbar />
+              <Suspense fallback={<div className="h-[61px] border-b border-slate-200 bg-white/95" />}>
+                <Navbar />
+              </Suspense>
               <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">
                 {children}
               </main>

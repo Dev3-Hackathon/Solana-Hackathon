@@ -1,6 +1,14 @@
-export type JobStatus = 
-  | "Created" | "Funded" | "Accepted" | "Submitted" 
-  | "VerdictProposed" | "Disputed" | "Released" | "Refunded" | "Cancelled";
+export type JobStatus =
+  | "Created"
+  | "Funded"
+  | "Accepted"
+  | "Submitted"
+  | "VerdictProposed"
+  | "Disputed"
+  | "Released"
+  | "Refunded"
+  | "Resolved"
+  | "Cancelled";
 
 export interface Job {
   jobId: number;
@@ -9,7 +17,7 @@ export interface Job {
   arbiter: string;
   admin: string;
   amount: number; // lamports
-  specHash: number[]; 
+  specHash: number[];
   deliverableUri: string;
   deliverableHash: number[];
   status: JobStatus;
@@ -21,7 +29,7 @@ export interface Job {
   deadline: number;
   disputedBy: string;
   bump: number;
-  submittedAt: number; // 🆕 Y17: 新增字段，用于计算 Review Timeout
+  submittedAt: number;
 }
 
 export interface Verdict {
@@ -35,4 +43,13 @@ export interface Verdict {
   }[];
   summary: string;
   risks: string[];
+}
+
+export interface JobRecord {
+  pda: string;
+  title: string;
+  description: string;
+  job: Job;
+  verdict?: Verdict;
+  disputeReason?: string;
 }
