@@ -1,68 +1,46 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { mockJobSubmitted } from '@/mock';
-import JobActionPanel from '@/components/JobActionPanel';
+import React, { useEffect } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession } from "../context/SessionContext";
 
-export default function Home() {
-  const [role, setRole] = useState<'freelancer' | 'client'>('freelancer');
+export default function HomePage() {
+  const router = useRouter();
+  const { role, isReady } = useSession();
 
-  const currentWallet =
-    role === 'freelancer'
-      ? mockJobSubmitted.freelancer
-      : mockJobSubmitted.client;
+  useEffect(() => {
+    if (isReady && role) {
+      router.replace(`/${role}`);
+    }
+  }, [isReady, role, router]);
 
   return (
-    <main className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-6">
-        Job Detail (Mock Test)
+    <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-xs">
+      <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+        Solana Escrow + AI Arbitration
+      </span>
+      <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-900">
+        Trustless Freelance Escrow with Automated Verdict &amp; Dispute Protection
       </h1>
+      <p className="mt-3 text-sm leading-relaxed text-slate-600">
+        Funds are locked in a non-custodial Solana PDA. If the AI Arbiter does not post a verdict within the review timeout, either party can escalate to dispute—ensuring funds are never stuck.
+      </p>
 
-      <div className="mb-4 p-4 bg-gray-100 rounded space-y-2">
-        <p>
-          <strong>Status:</strong> {mockJobSubmitted.status}
-        </p>
-
-        <p>
-          <strong>Submitted At:</strong>{' '}
-          {new Date(
-            mockJobSubmitted.submittedAt * 1000
-          ).toLocaleString()}
-        </p>
-
-        <p>
-          <strong>Current Role:</strong> {role}
-        </p>
-
-        <p>
-          <strong>Current Wallet:</strong>{' '}
-          {currentWallet.slice(0, 8)}...
-        </p>
-      </div>
-
-      <div className="flex gap-3 mb-6">
-        <button
-          onClick={() => setRole('freelancer')}
-          className="px-4 py-2 bg-blue-600 text-white rounded"
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        <Link
+          href="/login"
+          className="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
         >
-          Freelancer
-        </button>
-
-        <button
-          onClick={() => setRole('client')}
-          className="px-4 py-2 bg-green-600 text-white rounded"
+          Choose Role / Sign In
+        </Link>
+        <Link
+          href="/client"
+          className="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
         >
-          Client
-        </button>
+          Explore Client Portal
+        </Link>
       </div>
-
-      <JobActionPanel
-        job={mockJobSubmitted}
-        currentWallet={currentWallet}
-        onDispute={() => alert('Calling Solana program: dispute() instruction!')}
-        onApprove={() => alert('Calling Solana program: approve() instruction!')}
-        onRetryAI={() => alert('Calling Backend: POST /api/jobs/:pda/evaluate')}
-      />
-    </main>
+    </div>
   );
 }
