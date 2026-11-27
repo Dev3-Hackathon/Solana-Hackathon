@@ -142,3 +142,49 @@ export async function triggerJobEvaluation(jobPda: string): Promise<void> {
     throw new Error(err.error || `Evaluation request failed (${res.status})`);
   }
 }
+
+export interface PriceEstimateResponse {
+  recommendedSol: number;
+  minSol: number;
+  maxSol: number;
+  rationale: string;
+}
+
+export async function estimateJobPrice(payload: {
+  title: string;
+  description: string;
+}): Promise<PriceEstimateResponse> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/specs/estimate-price`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.ok) {
+      return (await res.json()) as PriceEstimateResponse;
+    }
+  } catch {
+    // Fallback to local scope heuristic when backend route is unavailable
+  }
+
+  const text = `${payload.title} ${payload.description}`.toLowerCase();
+  let baseSol = 1.0;
+
+  if (/(audit|security|smart contract|anchor|token-2022|zk|rust)/.test(text)) baseSol += 1.5;
+  if (/(indexer|backend|api|database|postgres|webhook|pipeline)/.test(text)) baseSol += 0.8;
+  if (/(frontend|ui|dashboard|next\.js|react|wallet)/.test(text)) baseSol += 0.6;
+  if (/(test|unit test|integration|ci|deploy)/.test(text)) baseSol += 0.4;
+
+  const wordBonus = Math.min(1.0, Math.floor(text.split(/\s+/).length / 25) * 0.25);
+  const recommendedSol = Number((baseSol + wordBonus).toFixed(2));
+  const minSol = Number(Math.max(0.2, recommendedSol * 0.7).toFixed(2));
+  const maxSol = Number((recommendedSol * 1.4).toFixed(2));
+
+  return {
+    recommendedSol,
+    minSol,
+    maxSol,
+    rationale: "Estimated from technical scope, stack complexity, and deliverables.",
+  };
+}
