@@ -13,3 +13,4 @@ keys/
 data/
 node_modules/.env.local
 .env.*.local
+backend/keys/
