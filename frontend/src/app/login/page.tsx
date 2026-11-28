@@ -1,15 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { usePollar, WalletButton } from "@pollar/react";
 import { DEMO_WALLETS, UserRole, useSession } from "../../context/SessionContext";
-
-const WalletMultiButton = dynamic(
-  async () => (await import("@solana/wallet-adapter-react-ui")).WalletMultiButton,
-  { ssr: false }
-);
 
 const ADMIN_PASSCODE = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "admin";
 const ADMIN_ALLOWLIST_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET || "";
@@ -25,21 +19,24 @@ const ROLES: {
   {
     id: "client",
     title: "Client (Customer)",
-    subtitle: "Create & fund escrow jobs, approve deliveries, or dispute timed-out reviews.",
+    subtitle:
+      "Sign in with Pollar to create & fund escrow jobs, approve deliveries, or dispute timed-out reviews.",
     route: "/client",
-    badge: "Buyer",
+    badge: "Buyer · Pollar",
   },
   {
     id: "seller",
     title: "Seller (Freelancer)",
-    subtitle: "Submit deliverables against locked escrows and trigger AI verification.",
+    subtitle:
+      "Sign in with Pollar to submit deliverables against locked escrows, trigger AI review, and receive payouts.",
     route: "/seller",
-    badge: "Provider",
+    badge: "Provider · Pollar",
   },
   {
     id: "admin",
     title: "Admin / Protocol Operator",
-    subtitle: "Inspect disputed escrows, timeout audit logs, and resolve split payouts.",
+    subtitle:
+      "Inspect disputed escrows, timeout audit logs, and resolve split payouts.",
     route: "/admin",
     badge: "Arbiter Admin",
   },
@@ -50,8 +47,9 @@ export default function LoginPage() {
   const {
     role,
     walletAddress,
+    pollarAddress,
     isWalletConnected,
-    isPollarConnected,
+    isPollarVerified,
     setRole,
     loginAsDemo,
   } = useSession();
@@ -78,16 +76,28 @@ export default function LoginPage() {
     ? pollarWallets.find((w) => w.chain === "SOLANA")
     : undefined;
   const activePollarAddress =
-    solanaPollarWallet?.address ?? pollarWallet?.address ?? null;
+    solanaPollarWallet?.address ?? pollarWallet?.address ?? pollarAddress ?? null;
 
-  const handlePollarGoogleLogin = () => {
+  const triggerPollarProviderLogin = (provider: "google" | "email") => {
     setPollarError(null);
-    pollarLogin({ provider: "google" });
-  };
-
-  const handlePollarEmailLogin = () => {
-    setPollarError(null);
-    pollarLogin({ provider: "email" });
+    try {
+      const result = pollarLogin({ provider }) as unknown | Promise<unknown>;
+      if (result && typeof (result as Promise<unknown>).catch === "function") {
+        (result as Promise<unknown>).catch((err: unknown) => {
+          setPollarError(
+            err instanceof Error
+              ? err.message
+              : `Pollar ${provider} sign-in failed.`
+          );
+        });
+      }
+    } catch (err) {
+      setPollarError(
+        err instanceof Error
+          ? err.message
+          : `Pollar ${provider} sign-in failed.`
+      );
+    }
   };
 
   const handleCreatePollarWallet = async () => {
@@ -156,10 +166,10 @@ export default function LoginPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="space-y-1">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-          Connect Wallet &amp; Select Portal
+          Connect Pollar Wallet &amp; Select Portal
         </h1>
         <p className="text-sm text-slate-600">
-          Sign in with Pollar for an instant gas-sponsored Solana wallet, connect Phantom/Solflare, or use a 1-click demo wallet.
+          Sign in with Pollar to use your Solana Devnet wallet across Client and Seller portals, or enter with a demo wallet.
         </p>
       </div>
 
@@ -167,13 +177,24 @@ export default function LoginPage() {
       <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-5 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-slate-900">
                 Pollar Embedded Solana Wallet
               </span>
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
-                Gas-Sponsored USDC
+                Client &amp; Seller Ready
               </span>
+              {isPollarAuthenticated && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    isPollarVerified
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {isPollarVerified ? "Verified" : "Unverified"}
+                </span>
+              )}
             </div>
 
             {activePollarAddress ? (
@@ -183,7 +204,7 @@ export default function LoginPage() {
                   <span className="font-mono break-all">{activePollarAddress}</span>
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Fund this Devnet address via Solana Faucet (SOL) &amp; Circle Faucet (USDC).
+                  Use this Devnet wallet across both Client and Seller portals.
                 </p>
               </div>
             ) : isPollarAuthenticated ? (
@@ -207,14 +228,14 @@ export default function LoginPage() {
             <>
               <button
                 type="button"
-                onClick={handlePollarGoogleLogin}
+                onClick={() => triggerPollarProviderLogin("google")}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
               >
                 Continue with Google
               </button>
               <button
                 type="button"
-                onClick={handlePollarEmailLogin}
+                onClick={() => triggerPollarProviderLogin("email")}
                 className="rounded-lg border border-blue-300 bg-white px-3.5 py-2 text-xs font-semibold text-blue-900 hover:bg-blue-50 transition"
               >
                 Email Login
@@ -266,33 +287,11 @@ export default function LoginPage() {
         )}
       </div>
 
-      {/* External Solana Wallet Adapter Box */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
-        <div className="space-y-1">
-          <div className="text-sm font-semibold text-slate-900">
-            External Solana Wallet (Phantom / Solflare)
-          </div>
-          {isWalletConnected && !isPollarConnected && walletAddress ? (
-            <p className="text-xs text-emerald-700 font-medium">
-              Connected: <span className="font-mono">{walletAddress}</span>
-            </p>
-          ) : (
-            <p className="text-xs text-slate-600">
-              {isPollarConnected
-                ? "Pollar wallet is currently active above"
-                : "Optional browser extension connection"}
-            </p>
-          )}
-        </div>
-
-        <WalletMultiButton />
-      </div>
-
       {/* Role / Portal Selector */}
       <div className="space-y-3">
         <h2 className="text-sm font-semibold text-slate-800">
           {isWalletConnected
-            ? "Choose which portal to open with your connected wallet:"
+            ? "Choose which portal to open with your Pollar wallet:"
             : "Or enter a portal with a 1-click Demo Wallet:"}
         </h2>
 

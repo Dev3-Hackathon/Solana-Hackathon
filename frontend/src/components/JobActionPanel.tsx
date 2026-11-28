@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState } from 'react';
@@ -13,6 +12,15 @@ interface JobActionPanelProps {
     onRetryAI: () => void;
 }
 
+function toSecs(val: unknown, fallback = 300): number {
+    if (typeof val === 'number' && Number.isFinite(val)) return val;
+    if (val && typeof (val as { toNumber?: () => number }).toNumber === 'function') {
+        return (val as { toNumber: () => number }).toNumber();
+    }
+    const parsed = Number(val);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export default function JobActionPanel({
     job,
     currentWallet,
@@ -23,12 +31,11 @@ export default function JobActionPanel({
     const [isTimeoutReached, setIsTimeoutReached] = useState(false);
     const [isDisputeWindowClosed, setIsDisputeWindowClosed] = useState(false);
 
-    const reviewTimeoutSecs = parseInt(
-        process.env.NEXT_PUBLIC_REVIEW_TIMEOUT_SECS || '300',
-        10
-    );
+    const disputeWindowSecs = toSecs(job.disputeWindowSecs, 300);
+    const submittedAtSecs = toSecs(job.submittedAt, 0);
+    const verdictProposedAtSecs = toSecs(job.verdictProposedAt, 0);
 
-    const timeoutTarget = job.submittedAt + reviewTimeoutSecs;
+    const timeoutTarget = submittedAtSecs + disputeWindowSecs;
 
     const isClient = currentWallet === job.client;
     const isFreelancer = currentWallet === job.freelancer;
@@ -88,8 +95,7 @@ export default function JobActionPanel({
     }
 
     if (job.status === 'VerdictProposed') {
-        const disputeDeadline =
-            job.verdictProposedAt + job.disputeWindowSecs;
+        const disputeDeadline = verdictProposedAtSecs + disputeWindowSecs;
 
         return (
             <div className="p-4 border border-orange-300 bg-orange-50 rounded-lg space-y-4">

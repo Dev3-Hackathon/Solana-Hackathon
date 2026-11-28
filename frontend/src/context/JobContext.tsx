@@ -6,12 +6,23 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 import { Job, JobRecord, JobStatus, Verdict } from "../types";
 import { SEED_JOBS } from "../lib/mockJobs";
-import { postJobSpec, linkJobSpec } from "../lib/api";
+import {
+  confirmJobFunding,
+  createJobFor,
+  linkJobSpec,
+  postJobSpec,
+} from "../lib/api";
 import { useProgram } from "../hooks/useProgram";
 import { DEMO_WALLETS } from "./SessionContext";
 import escrowIdl from "../idl/escrow.json";
 
 const ESCROW_IDL = escrowIdl as unknown as Idl;
+
+export type PollarSendPaymentFn = (params: {
+  chain: "SOLANA";
+  destination: string;
+  amount: string;
+}) => Promise<{ status: string; hash?: string; message?: string; code?: string }>;
 
 interface JobsContextValue {
   records: JobRecord[];
@@ -22,6 +33,14 @@ interface JobsContextValue {
     title: string,
     description: string,
     amountSol: number,
+    sellerAddress?: string
+  ) => Promise<JobRecord>;
+  createJobWithPollar: (
+    title: string,
+    description: string,
+    amountSol: number,
+    clientPollarAddress: string,
+    sendPayment: PollarSendPaymentFn,
     sellerAddress?: string
   ) => Promise<JobRecord>;
   updateJobPrice: (pda: string, nextAmountSol: number) => void;
@@ -241,6 +260,91 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return newRecord;
   };
 
+  const createJobWithPollar = async (
+    title: string,
+    description: string,
+    amountSol: number,
+    clientPollarAddress: string,
+    sendPayment: PollarSendPaymentFn,
+    sellerAddress: string = DEMO_WALLETS.seller
+  ): Promise<JobRecord> => {
+    const amountLamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+    const now = Math.floor(Date.now() / 1000);
+    const disputeWindowSecs = 300;
+    const deadline = now + 86400;
+
+    // 1. Upload written spec and get specId + canonical specHash
+    const { specId, specHash } = await postJobSpec({
+      title,
+      description,
+      criteria: [description],
+    });
+    const specHashBytes = to32ByteArray(specHash);
+
+    // 2. Ask backend relayer to create the job PDA via create_job_for
+    const createdFor = await createJobFor({
+      client: clientPollarAddress,
+      freelancer: sellerAddress,
+      amountLamports,
+      specId,
+      deadline,
+      disputeWindowSecs,
+    });
+
+    const jobPdaStr = createdFor.jobPda;
+    const resolvedJobId =
+      typeof createdFor.jobId === "number"
+        ? createdFor.jobId
+        : records.reduce((max, r) => Math.max(max, Number(r.job.jobId) || 0), 100) + 1;
+
+    // 3. Pay escrow using Pollar sendPayment with exact integer lamports string
+    const outcome = await sendPayment({
+      chain: "SOLANA",
+      destination: jobPdaStr,
+      amount: String(amountLamports),
+    });
+
+    if (outcome.status === "error") {
+      throw new Error(outcome.message || outcome.code || "Pollar payment failed.");
+    }
+
+    // 4. Confirm funding with retries (~5x, 2s apart on 409 / NOT_FUNDED)
+    await confirmJobFunding(jobPdaStr, 5, 2000);
+
+    // 5. Link spec to confirmed job PDA
+    await linkJobSpec(jobPdaStr, { specId, specHash }).catch(() => {});
+
+    const newRecord: JobRecord = {
+      pda: jobPdaStr,
+      title,
+      description,
+      job: {
+        jobId: resolvedJobId,
+        client: clientPollarAddress,
+        freelancer: sellerAddress,
+        arbiter: "ArbIter444444444444444444444444444444444444",
+        admin: DEMO_WALLETS.admin,
+        amount: amountLamports,
+        specHash: specHashBytes,
+        deliverableUri: "",
+        deliverableHash: new Array(32).fill(0),
+        status: "Funded",
+        verdict: 0,
+        verdictScore: 0,
+        verdictUri: "",
+        verdictProposedAt: 0,
+        disputeWindowSecs,
+        deadline,
+        disputedBy: "",
+        bump: 255,
+        submittedAt: 0,
+      },
+    };
+
+    setRecords((prev) => [newRecord, ...prev]);
+    return newRecord;
+  };
+
   const updateJobPrice = (pda: string, nextAmountSol: number) => {
     if (Number.isNaN(nextAmountSol) || nextAmountSol <= 0) return;
     const nextLamports = Math.round(nextAmountSol * LAMPORTS_PER_SOL);
@@ -352,6 +456,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         isLiveChain: isReady,
         getJobByPda,
         createJob,
+        createJobWithPollar,
         updateJobPrice,
         submitWork,
         recordVerdict,

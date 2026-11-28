@@ -23,6 +23,29 @@ export interface LinkSpecResponse {
   verified: boolean;
 }
 
+export interface CreateJobForPayload {
+  client: string;
+  freelancer: string;
+  amountLamports: number;
+  specId?: string;
+  deadline: number;
+  disputeWindowSecs: number;
+}
+
+export interface CreateJobForResponse {
+  jobPda: string;
+  jobId?: number;
+  txSignature?: string;
+}
+
+export interface ConfirmFundingResponse {
+  status?: string;
+  txSignature?: string;
+  confirmed?: boolean;
+  code?: string;
+  error?: string;
+}
+
 /**
  * Y22: Fetches the AI verdict report for a job PDA.
  * Gracefully handles 404 REPORT_NOT_FOUND when a job was disputed after review timeout.
@@ -70,7 +93,7 @@ export async function fetchBackendHealth(): Promise<HealthResponse | null> {
 }
 
 /**
- * Step 1 of Create Job: Upload written spec to backend and receive canonical specHash.
+ * Step 1 of Create Job: Upload written spec to backend and receive canonical specId + specHash.
  */
 export async function postJobSpec(payload: {
   title: string;
@@ -89,6 +112,66 @@ export async function postJobSpec(payload: {
   }
 
   return (await res.json()) as SpecResponse;
+}
+
+/**
+ * Pollar Flow Step 2: Ask backend relayer to initialize the job PDA via create_job_for.
+ */
+export async function createJobFor(
+  payload: CreateJobForPayload
+): Promise<CreateJobForResponse> {
+  const res = await fetch(`${BACKEND_URL}/api/jobs/create-for`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.jobPda) {
+    throw new Error(
+      data.error || data.message || `Failed to create job via relayer (${res.status})`
+    );
+  }
+
+  return data as CreateJobForResponse;
+}
+
+/**
+ * Pollar Flow Step 4: Confirm funding on-chain; retries ~5 times (2s apart) when NOT_FUNDED (409).
+ */
+export async function confirmJobFunding(
+  jobPda: string,
+  maxAttempts = 5,
+  delayMs = 2000
+): Promise<ConfirmFundingResponse> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${BACKEND_URL}/api/jobs/${jobPda}/confirm-funding`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    const data = (await res.json().catch(() => ({}))) as ConfirmFundingResponse;
+
+    if (res.ok) {
+      return { ...data, confirmed: true };
+    }
+
+    const isNotFunded =
+      res.status === 409 ||
+      data.code === "NOT_FUNDED" ||
+      String(data.error ?? "").toUpperCase().includes("NOT_FUNDED");
+
+    if (isNotFunded && attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    throw new Error(
+      data.error || `Funding confirmation failed (${res.status})`
+    );
+  }
+
+  throw new Error("Funding not yet confirmed after retries (NOT_FUNDED).");
 }
 
 /**

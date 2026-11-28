@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePollar } from "@pollar/react";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
 import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
@@ -9,8 +10,15 @@ import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
 const FALLBACK_SOL_USD = 150;
 
 export default function ClientPortalPage() {
-  const { records, isLoaded, createJob } = useJobs();
-  const { role, walletAddress, loginAsDemo } = useSession();
+  const { records, isLoaded, createJobWithPollar } = useJobs();
+  const {
+    role,
+    walletAddress,
+    pollarAddress,
+    isPollarVerified,
+    loginAsDemo,
+  } = useSession();
+  const { sendPayment } = usePollar();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -50,6 +58,26 @@ export default function ClientPortalPage() {
   const isHighball = priceEstimate !== null && validSol > priceEstimate.maxSol;
   const isOutOfBounds = isLowball || isHighball;
 
+  const validateScopeAndBounds = (): boolean => {
+    if (!title.trim()) {
+      setCreateError("Please enter a job title.");
+      return false;
+    }
+    if (isLowball && priceEstimate) {
+      setCreateError(
+        `Lowball protection: Amount (${validSol.toFixed(2)} SOL) is below the AI minimum of ${priceEstimate.minSol.toFixed(2)} SOL.`
+      );
+      return false;
+    }
+    if (isHighball && priceEstimate) {
+      setCreateError(
+        `Highball protection: Amount (${validSol.toFixed(2)} SOL) exceeds the AI maximum of ${priceEstimate.maxSol.toFixed(2)} SOL.`
+      );
+      return false;
+    }
+    return true;
+  };
+
   const handleGetAiEstimate = async () => {
     if (!title.trim() && !description.trim()) {
       setCreateError("Enter a job title or acceptance criteria first so AI can price the scope.");
@@ -80,21 +108,16 @@ export default function ClientPortalPage() {
     .filter((r) => !["Released", "Refunded", "Cancelled"].includes(r.job.status))
     .reduce((sum, r) => sum + r.job.amount, 0);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handlePayEscrowWithPollar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isSubmitting) return;
+    if (isSubmitting || !validateScopeAndBounds()) return;
 
-    if (isLowball && priceEstimate) {
-      setCreateError(
-        `Lowball protection: Amount (${validSol.toFixed(2)} SOL) is below the AI minimum of ${priceEstimate.minSol.toFixed(2)} SOL.`
-      );
+    if (!pollarAddress) {
+      setCreateError("Connect a Pollar Solana wallet on /login to pay escrow with Pollar.");
       return;
     }
-
-    if (isHighball && priceEstimate) {
-      setCreateError(
-        `Highball protection: Amount (${validSol.toFixed(2)} SOL) exceeds the AI maximum of ${priceEstimate.maxSol.toFixed(2)} SOL.`
-      );
+    if (!isPollarVerified) {
+      setCreateError("Pollar session is not verified yet. Complete verification before paying.");
       return;
     }
 
@@ -104,21 +127,23 @@ export default function ClientPortalPage() {
 
     try {
       if (role !== "client") loginAsDemo("client");
-      const created = await createJob(
+      const created = await createJobWithPollar(
         title.trim(),
         description.trim() || "Written acceptance criteria attached.",
-        validSol || 1
+        validSol || 1,
+        pollarAddress,
+        sendPayment
       );
       setTitle("");
       setDescription("");
       setPriceEstimate(null);
       setCreatedBanner(
-        `Created & funded Job #${created.job.jobId} (${validSol.toFixed(2)} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
+        `Paid & confirmed Job #${created.job.jobId} via Pollar (${validSol.toFixed(2)} SOL locked in PDA ${created.pda.slice(0, 6)}...${created.pda.slice(-4)}).`
       );
-      setTimeout(() => setCreatedBanner(null), 4000);
+      setTimeout(() => setCreatedBanner(null), 6000);
     } catch (err) {
       setCreateError(
-        err instanceof Error ? err.message : "Failed to create escrow job."
+        err instanceof Error ? err.message : "Pollar escrow payment failed."
       );
     } finally {
       setIsSubmitting(false);
@@ -129,6 +154,8 @@ export default function ClientPortalPage() {
     return <div className="text-sm text-slate-500">Loading Client Portal...</div>;
   }
 
+  const canPayWithPollar = Boolean(pollarAddress && isPollarVerified);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -137,7 +164,7 @@ export default function ClientPortalPage() {
             Client Portal (Customer)
           </h1>
           <p className="text-sm text-slate-600">
-            Fund non-custodial Solana escrows, inspect AI verdicts, or dispute timed-out reviews.
+            Fund non-custodial Solana escrows with Pollar, inspect AI verdicts, or dispute timed-out reviews.
           </p>
         </div>
 
@@ -154,7 +181,7 @@ export default function ClientPortalPage() {
 
       {/* Create & Fund Escrow Form */}
       <form
-        onSubmit={handleCreate}
+        onSubmit={handlePayEscrowWithPollar}
         className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -201,7 +228,7 @@ export default function ClientPortalPage() {
               <input
                 type="number"
                 step="0.05"
-                min="0.1"
+                min="0.001"
                 required
                 disabled={isSubmitting}
                 value={amountSol}
@@ -286,6 +313,16 @@ export default function ClientPortalPage() {
           </div>
         )}
 
+        {!canPayWithPollar && (
+          <p className="text-xs text-slate-500">
+            Sign in with Pollar and verify your session on{" "}
+            <Link href="/login" className="font-semibold text-blue-600 hover:underline">
+              /login
+            </Link>{" "}
+            to pay escrow with Pollar.
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {createdBanner && (
@@ -300,7 +337,7 @@ export default function ClientPortalPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!priceEstimate && (
               <button
                 type="button"
@@ -314,10 +351,10 @@ export default function ClientPortalPage() {
 
             <button
               type="submit"
-              disabled={isSubmitting || isOutOfBounds}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isSubmitting || isOutOfBounds || !canPayWithPollar}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? "Creating & Linking Spec..." : "Create & Lock Funds"}
+              {isSubmitting ? "Paying with Pollar..." : "Pay escrow with Pollar"}
             </button>
           </div>
         </div>
