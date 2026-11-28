@@ -7,6 +7,7 @@ import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 import { Job, JobRecord, JobStatus, Verdict } from "../types";
 import { SEED_JOBS } from "../lib/mockJobs";
 import {
+  buildCriteriaArray,
   confirmJobFunding,
   createJobFor,
   linkJobSpec,
@@ -162,7 +163,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const { specId, specHash } = await postJobSpec({
         title,
         description,
-        criteria: [description],
+        criteria: buildCriteriaArray(description, title),
       });
       const specHashBytes = to32ByteArray(specHash);
 
@@ -277,7 +278,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     const { specId, specHash } = await postJobSpec({
       title,
       description,
-      criteria: [description],
+      criteria: buildCriteriaArray(description, title),
     });
     const specHashBytes = to32ByteArray(specHash);
 

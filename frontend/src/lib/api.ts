@@ -46,6 +46,31 @@ export interface ConfirmFundingResponse {
   error?: string;
 }
 
+export function buildCriteriaArray(rawInput: string, fallbackTitle?: string): string[] {
+  const splitItems = rawInput
+    .split(/[\r\n,;•]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+
+  const defaults = [
+    fallbackTitle
+      ? `Completes scope for "${fallbackTitle.trim()}"`
+      : "Completes all agreed job deliverables",
+    "Passes functional verification and quality checks",
+    "Submitted cleanly for escrow review",
+  ];
+
+  const merged = [...splitItems];
+  for (const fallbackItem of defaults) {
+    if (merged.length >= 3) break;
+    if (!merged.includes(fallbackItem)) {
+      merged.push(fallbackItem);
+    }
+  }
+
+  return merged;
+}
+
 /**
  * Y22: Fetches the AI verdict report for a job PDA.
  * Gracefully handles 404 REPORT_NOT_FOUND when a job was disputed after review timeout.
@@ -100,10 +125,21 @@ export async function postJobSpec(payload: {
   description: string;
   criteria?: string[];
 }): Promise<SpecResponse> {
+  const normalizedCriteria =
+    payload.criteria && payload.criteria.length >= 3
+      ? payload.criteria
+      : buildCriteriaArray(
+          payload.criteria?.join(", ") || payload.description,
+          payload.title
+        );
+
   const res = await fetch(`${BACKEND_URL}/api/specs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      criteria: normalizedCriteria,
+    }),
   });
 
   if (!res.ok) {
