@@ -109,6 +109,31 @@ export type Escrow = {
       "args": []
     },
     {
+      "name": "confirmFunding",
+      "docs": [
+        "Pollar path: the client paid `amount` SOL straight to the Job PDA with a",
+        "plain transfer (Pollar `sendPayment`). Anyone can call this to mark it Funded",
+        "once the PDA holds rent + amount."
+      ],
+      "discriminator": [
+        30,
+        31,
+        203,
+        65,
+        164,
+        189,
+        67,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "job",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "createJob",
       "docs": [
         "Client creates a job. Arbiter and admin are fixed constants, never user input."
@@ -162,6 +187,97 @@ export type Escrow = {
         {
           "name": "jobId",
           "type": "u64"
+        },
+        {
+          "name": "freelancer",
+          "type": "pubkey"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "specHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        },
+        {
+          "name": "disputeWindowSecs",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "createJobFor",
+      "docs": [
+        "Pollar path: a relayer (backend) creates the job on behalf of a client",
+        "whose wallet can't sign program calls (e.g. a Pollar social-login wallet).",
+        "The client is just an address here; refunds always go to it."
+      ],
+      "discriminator": [
+        248,
+        164,
+        99,
+        110,
+        68,
+        183,
+        186,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Relayer / fee payer. Pays rent for the Job account; has no rights over it."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "job",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  106,
+                  111,
+                  98
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "client"
+              },
+              {
+                "kind": "arg",
+                "path": "jobId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "jobId",
+          "type": "u64"
+        },
+        {
+          "name": "client",
+          "type": "pubkey"
         },
         {
           "name": "freelancer",
@@ -585,11 +701,16 @@ export type Escrow = {
     },
     {
       "code": 6012,
+      "name": "notFunded",
+      "msg": "Job PDA does not hold the escrow amount yet"
+    },
+    {
+      "code": 6013,
       "name": "insufficientEscrow",
       "msg": "Escrow balance too low"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "mathOverflow",
       "msg": "Arithmetic overflow"
     }

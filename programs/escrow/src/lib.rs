@@ -94,6 +94,82 @@ pub mod escrow {
         Ok(())
     }
 
+        /// Pollar path: a relayer (backend) creates the job on behalf of a client
+    /// whose wallet can't sign program calls (e.g. a Pollar social-login wallet).
+    /// The client is just an address here; refunds always go to it.
+    pub fn create_job_for(
+        ctx: Context<CreateJobFor>,
+        job_id: u64,
+        client: Pubkey,
+        freelancer: Pubkey,
+        amount: u64,
+        spec_hash: [u8; 32],
+        deadline: i64,
+        dispute_window_secs: i64,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(amount >= MIN_AMOUNT_LAMPORTS, ErrorCode::InvalidAmount);
+        require_keys_neq!(freelancer, client, ErrorCode::InvalidFreelancer);
+        require!(deadline > now, ErrorCode::DeadlinePassed);
+        require!(
+            (MIN_WINDOW_SECS..=MAX_WINDOW_SECS).contains(&dispute_window_secs),
+            ErrorCode::InvalidWindow
+        );
+
+        ctx.accounts.job.set_inner(Job {
+            job_id,
+            client,
+            freelancer,
+            arbiter: ARBITER,
+            admin: ADMIN,
+            amount,
+            spec_hash,
+            deliverable_hash: [0u8; 32],
+            status: JobStatus::Created,
+            verdict: VERDICT_NONE,
+            verdict_score: 0,
+            verdict_proposed_at: 0,
+            dispute_window_secs,
+            deadline,
+            disputed_by: Pubkey::default(),
+            bump: ctx.bumps.job,
+            submitted_at: 0,
+            deliverable_uri: String::new(),
+            verdict_uri: String::new(),
+        });
+
+        emit!(JobCreated {
+            job: ctx.accounts.job.key(),
+            client,
+            freelancer,
+            amount,
+        });
+        Ok(())
+    }
+
+    /// Pollar path: the client paid `amount` SOL straight to the Job PDA with a
+    /// plain transfer (Pollar `sendPayment`). Anyone can call this to mark it Funded
+    /// once the PDA holds rent + amount.
+    pub fn confirm_funding(ctx: Context<ConfirmFunding>) -> Result<()> {
+        require!(
+            ctx.accounts.job.status == JobStatus::Created,
+            ErrorCode::InvalidStatus
+        );
+        let info = ctx.accounts.job.to_account_info();
+        let rent_min = Rent::get()?.minimum_balance(info.data_len());
+        let needed = rent_min
+            .checked_add(ctx.accounts.job.amount)
+            .ok_or(ErrorCode::MathOverflow)?;
+        require!(info.lamports() >= needed, ErrorCode::NotFunded);
+
+        ctx.accounts.job.status = JobStatus::Funded;
+        emit!(JobFunded {
+            job: ctx.accounts.job.key(),
+            amount: ctx.accounts.job.amount,
+        });
+        Ok(())
+    }
+
     /// Client moves `amount` lamports into the Job PDA.
     pub fn fund_job(ctx: Context<FundJob>) -> Result<()> {
         require!(
@@ -392,6 +468,30 @@ pub struct CreateJob<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(job_id: u64, client: Pubkey)]
+pub struct CreateJobFor<'info> {
+    /// Relayer / fee payer. Pays rent for the Job account; has no rights over it.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(
+        init,
+        payer = payer,
+        space = 8 + Job::INIT_SPACE,
+        seeds = [JOB_SEED, client.as_ref(), &job_id.to_le_bytes()],
+        bump
+    )]
+    pub job: Account<'info, Job>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Permissionless: only checks the Job PDA's balance.
+#[derive(Accounts)]
+pub struct ConfirmFunding<'info> {
+    #[account(mut)]
+    pub job: Account<'info, Job>,
+}
+
+#[derive(Accounts)]
 pub struct FundJob<'info> {
     #[account(mut)]
     pub client: Signer<'info>,
@@ -603,6 +703,8 @@ pub enum ErrorCode {
     InvalidVerdict,
     #[msg("No verdict yet, but the review timeout has not passed")]
     ReviewNotTimedOut,
+    #[msg("Job PDA does not hold the escrow amount yet")]
+    NotFunded,
     #[msg("Escrow balance too low")]
     InsufficientEscrow,
     #[msg("Arithmetic overflow")]
