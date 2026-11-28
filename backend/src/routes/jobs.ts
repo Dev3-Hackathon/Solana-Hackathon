@@ -18,7 +18,13 @@ import {
 } from "../evaluate";
 import { sha256Hex } from "../hash";
 import { HttpError, parseBody, requirePubkey } from "../http";
-import { getJob, proposeVerdictOnChain } from "../solana";
+import {
+  confirmFundingOnChain,
+  createJobForOnChain,
+  getJob,
+  isNotFundedAnchorError,
+  proposeVerdictOnChain,
+} from "../solana";
 import { z } from "zod";
 
 export const jobsRouter = Router();
@@ -38,12 +44,128 @@ interface SpecRow {
   criteria_json: string;
 }
 
+interface SpecHashRow {
+  id: string;
+  spec_hash: string;
+}
+
 interface SnapshotRow {
   source_url: string;
   content: Buffer;
   sha256: string;
   content_type: DeliverableContentType;
 }
+
+const createJobForSchema = z.object({
+  client: z.string().trim().min(32).max(64),
+  freelancer: z.string().trim().min(32).max(64),
+  amountLamports: z
+    .union([z.string(), z.number().int().positive()])
+    .transform((v) => String(v).trim())
+    .refine((v) => /^\d+$/.test(v) && BigInt(v) >= 1_000_000n, {
+      message: "amountLamports must be an integer >= 1000000 (0.001 SOL)",
+    }),
+  specId: z.string().trim().min(1).max(128),
+  deadline: z.number().int(),
+  disputeWindowSecs: z.number().int().min(5).max(604_800),
+});
+
+// POST /api/jobs/create-for (Pollar relayer path)
+jobsRouter.post("/jobs/create-for", async (req, res) => {
+  const body = parseBody(createJobForSchema, req.body);
+  const client = requirePubkey(body.client);
+  const freelancer = requirePubkey(body.freelancer);
+
+  if (client === freelancer) {
+    throw new HttpError(400, "INVALID_FREELANCER", "Freelancer must differ from client");
+  }
+
+  const nowSecs = Math.floor(Date.now() / 1000);
+  if (body.deadline <= nowSecs) {
+    throw new HttpError(400, "DEADLINE_PASSED", "Deadline must be in the future");
+  }
+
+  const spec = db
+    .prepare(`SELECT id, spec_hash FROM specs WHERE id = ?`)
+    .get(body.specId) as SpecHashRow | undefined;
+
+  if (!spec) {
+    throw new HttpError(404, "SPEC_NOT_FOUND", `Spec not found: ${body.specId}`);
+  }
+
+  let created: { jobPda: string; jobId: string; txSignature: string };
+  try {
+    created = await createJobForOnChain({
+      client,
+      freelancer,
+      amountLamports: body.amountLamports,
+      specHashHex: spec.spec_hash,
+      deadline: body.deadline,
+      disputeWindowSecs: body.disputeWindowSecs,
+    });
+  } catch (err) {
+    throw new HttpError(
+      502,
+      "TX_FAILED",
+      `Failed to submit create_job_for on-chain: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  db.prepare(
+    `INSERT INTO job_specs (job_pda, spec_id)
+     VALUES (?, ?)
+     ON CONFLICT(job_pda) DO UPDATE SET spec_id = excluded.spec_id`
+  ).run(created.jobPda, spec.id);
+
+  console.log(`[create-for] created ${created.jobPda} for client ${client} (tx: ${created.txSignature})`);
+  res.status(201).json(created);
+});
+
+// POST /api/jobs/:jobPda/confirm-funding (Pollar payment confirmation)
+jobsRouter.post("/jobs/:jobPda/confirm-funding", async (req, res) => {
+  const jobPda = requirePubkey(req.params.jobPda);
+
+  const job = await getJob(jobPda);
+  if (job.status === "funded") {
+    res.json({ status: "funded", txSignature: null });
+    return;
+  }
+  if (job.status !== "created") {
+    throw new HttpError(
+      409,
+      "INVALID_STATUS",
+      `Job must be in 'created' status to confirm funding (current: '${job.status}')`
+    );
+  }
+
+  let txSignature: string;
+  try {
+    txSignature = await confirmFundingOnChain(jobPda);
+  } catch (err) {
+    if (isNotFundedAnchorError(err)) {
+      throw new HttpError(
+        409,
+        "NOT_FUNDED",
+        "Job PDA does not hold the required escrow amount yet"
+      );
+    }
+    if (isInvalidStatusAnchorError(err)) {
+      throw new HttpError(
+        409,
+        "INVALID_STATUS",
+        "Job is no longer in 'created' status"
+      );
+    }
+    throw new HttpError(
+      502,
+      "TX_FAILED",
+      `Failed to submit confirm_funding on-chain: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  console.log(`[confirm-funding] ${jobPda} marked funded (tx: ${txSignature})`);
+  res.json({ status: "funded", txSignature });
+});
 
 // 3.6  POST /api/jobs/:jobPda/evaluate
 jobsRouter.post("/jobs/:jobPda/evaluate", async (req, res) => {

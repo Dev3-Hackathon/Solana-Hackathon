@@ -1,8 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
+import BN from "bn.js";
 import { AnchorProvider, Idl, Program, Wallet } from "@coral-xyz/anchor";
-import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
 import { env } from "./env";
+import { hexToBytes } from "./hash";
 import { HttpError } from "./http";
 import { decodeJobAccount, JobView } from "./job";
 import { VerdictOutcome } from "./ai";
@@ -136,4 +138,70 @@ export async function proposeVerdictOnChain(
     .rpc();
 
   return txSignature;
+}
+
+export interface CreateJobForParams {
+  client: string;
+  freelancer: string;
+  amountLamports: string;
+  specHashHex: string;
+  deadline: number;
+  disputeWindowSecs: number;
+}
+
+export async function createJobForOnChain(
+  params: CreateJobForParams
+): Promise<{ jobPda: string; jobId: string; txSignature: string }> {
+  const program = getProgram();
+  const clientPk = new PublicKey(params.client);
+  const freelancerPk = new PublicKey(params.freelancer);
+  const jobId = new BN(Date.now());
+  const amount = new BN(params.amountLamports, 10);
+
+  const [jobPdaPk] = PublicKey.findProgramAddressSync(
+    [Buffer.from("job"), clientPk.toBuffer(), jobId.toArrayLike(Buffer, "le", 8)],
+    program.programId
+  );
+
+  const txSignature = await program.methods
+    .createJobFor(
+      jobId,
+      clientPk,
+      freelancerPk,
+      amount,
+      Array.from(hexToBytes(params.specHashHex)),
+      new BN(params.deadline),
+      new BN(params.disputeWindowSecs)
+    )
+    .accounts({
+      payer: arbiter.publicKey,
+      job: jobPdaPk,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([arbiter])
+    .rpc();
+
+  return {
+    jobPda: jobPdaPk.toBase58(),
+    jobId: jobId.toString(10),
+    txSignature,
+  };
+}
+
+export async function confirmFundingOnChain(jobPda: string): Promise<string> {
+  const program = getProgram();
+  const txSignature = await program.methods
+    .confirmFunding()
+    .accounts({
+      job: new PublicKey(jobPda),
+    })
+    .signers([arbiter])
+    .rpc();
+
+  return txSignature;
+}
+
+export function isNotFundedAnchorError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes("NotFunded") || msg.includes("does not hold the escrow amount yet");
 }
