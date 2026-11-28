@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { usePollar, WalletButton } from "@pollar/react";
+import { WalletButton } from "@pollar/react";
 import { useSession } from "../context/SessionContext";
 import { fetchBackendHealth } from "../lib/api";
 
@@ -24,13 +24,12 @@ function ProofPayLogoMark() {
 export default function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
-  const { role, walletAddress, isPollarConnected, isReady, logout } = useSession();
-  const { openReceiveModal } = usePollar();
+  const { role, walletAddress, isPollarConnected, isReady, switchRole } = useSession();
   const [arbiterSol, setArbiterSol] = useState<number>(DUMMY_ARBITER_SOL);
   const [isLiveHealth, setIsLiveHealth] = useState<boolean>(false);
   const [showAdminDemoModal, setShowAdminDemoModal] = useState<boolean>(false);
 
-  const homeHref = "/";
+  const isOnboardingPage = pathname === "/onboarding";
 
   useEffect(() => {
     let active = true;
@@ -59,16 +58,17 @@ export default function Navbar() {
 
   return (
     <>
-      <header className="sticky top-0 z-20 border-b border-blue-100 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-6">
+      <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2.5">
+          {/* Left: Brand + Primary Navigation */}
+          <div className="flex min-w-0 items-center gap-6">
             <Link
-              href={homeHref}
+              href="/"
               aria-label="ProofPay Home"
-              className="group flex items-center gap-2.5 focus:outline-none"
+              className="group flex shrink-0 items-center gap-2 focus:outline-none"
             >
               <ProofPayLogoMark />
-              <span className="font-semibold tracking-tight text-slate-900 group-hover:text-blue-700 transition">
+              <span className="text-base font-semibold tracking-tight text-slate-900 group-hover:text-blue-700 transition">
                 ProofPay
               </span>
             </Link>
@@ -83,10 +83,10 @@ export default function Navbar() {
                       key={link.href}
                       type="button"
                       onClick={() => setShowAdminDemoModal(true)}
-                      className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                      className={`h-9 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition ${
                         active
                           ? "bg-blue-50 text-blue-700"
-                          : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-950"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       }`}
                     >
                       {link.label}
@@ -98,10 +98,10 @@ export default function Navbar() {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    className={`inline-flex h-9 items-center whitespace-nowrap rounded-lg px-3 text-sm font-medium transition ${
                       active
                         ? "bg-blue-50 text-blue-700"
-                        : "text-slate-600 hover:bg-blue-50/70 hover:text-blue-950"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                     }`}
                   >
                     {link.label}
@@ -111,70 +111,65 @@ export default function Navbar() {
             </nav>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <span
-              className={`inline-block rounded-full border px-2.5 py-1 text-xs font-medium tabular-nums ${
-                isArbiterLow
-                  ? "border-red-300 bg-red-50 text-red-700"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
-              }`}
-              title={
-                isLiveHealth
-                  ? "Live Backend Arbiter Relayer SOL Balance"
-                  : "Dummy Arbiter Balance (Backend offline)"
-              }
-            >
-              Arbiter: {arbiterSol.toFixed(3)} SOL
-              {isArbiterLow ? " (Low!)" : !isLiveHealth ? " · Mock" : ""}
-            </span>
+          {/* Right: Uniform h-9 Status + Pollar Wallet + Role */}
+          <div className="flex shrink-0 items-center gap-2">
+            {!isOnboardingPage && (
+              <span
+                className={`hidden h-9 whitespace-nowrap rounded-lg border px-3 text-xs font-medium tabular-nums lg:inline-flex items-center gap-1.5 ${
+                  isArbiterLow
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
+                }`}
+                title={
+                  isLiveHealth
+                    ? "Live Backend Arbiter Relayer SOL Balance"
+                    : "Dummy Arbiter Balance (Backend offline)"
+                }
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    isArbiterLow
+                      ? "bg-red-500"
+                      : isLiveHealth
+                      ? "bg-emerald-500"
+                      : "bg-amber-400"
+                  }`}
+                />
+                Arbiter {arbiterSol.toFixed(2)} SOL
+              </span>
+            )}
 
-            <span className="hidden rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 sm:inline-block">
-              Devnet · Pollar
-            </span>
-
-            {isPollarConnected && <WalletButton />}
+            {isPollarConnected && (
+              <div className="inline-flex h-9 items-center [&_button]:!h-9 [&_button]:!min-h-0 [&_button]:!rounded-lg [&_button]:!px-3 [&_button]:!py-0 [&_button]:!text-xs [&_button]:!font-semibold [&_button]:!leading-none">
+                <WalletButton />
+              </div>
+            )}
 
             {isReady && role && walletAddress ? (
-              <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-xs">
-                <span className="font-semibold capitalize text-blue-700">
+              <div className="inline-flex h-9 items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50/90 px-3 text-xs">
+                <span className="font-semibold capitalize text-slate-800">
                   {role}
                 </span>
-                {isPollarConnected && (
-                  <span className="rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                    Pollar
-                  </span>
-                )}
-                <span className="font-mono text-slate-500">
-                  {walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}
-                </span>
-                {isPollarConnected && (
-                  <button
-                    type="button"
-                    onClick={() => openReceiveModal()}
-                    className="font-medium text-blue-700 hover:underline"
-                  >
-                    Receive
-                  </button>
-                )}
+                <span className="h-3.5 w-px bg-slate-200" />
                 <button
                   type="button"
                   onClick={() => {
-                    logout();
+                    switchRole();
                     router.push("/login");
                   }}
-                  className="ml-1 font-medium text-red-600 hover:underline"
+                  className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
                 >
                   Switch
                 </button>
               </div>
-            ) : (
+            ) : !isOnboardingPage ? (
               <Link
                 href="/login"
-                className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                className="inline-flex h-9 items-center whitespace-nowrap rounded-lg bg-blue-600 px-3.5 text-xs font-semibold text-white hover:bg-blue-700 transition"
               >
                 Connect / Login
               </Link>
-            )}
+            ) : null}
           </div>
         </div>
       </header>

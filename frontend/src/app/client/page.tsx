@@ -15,6 +15,7 @@ export default function ClientPortalPage() {
     role,
     walletAddress,
     pollarAddress,
+    isReady,
     isPollarVerified,
     loginAsDemo,
   } = useSession();
@@ -49,6 +50,10 @@ export default function ClientPortalPage() {
       active = false;
     };
   }, []);
+
+  if (!isReady || !isLoaded) {
+    return <div className="text-sm text-slate-500">Loading Client Portal...</div>;
+  }
 
   const parsedSol = parseFloat(amountSol);
   const validSol = !Number.isNaN(parsedSol) && parsedSol > 0 ? parsedSol : 0;
@@ -98,10 +103,15 @@ export default function ClientPortalPage() {
   };
 
   const activeClientWallet =
-    role === "client" && walletAddress ? walletAddress : DEMO_WALLETS.client;
+    (role === "client" || role === "seller") && walletAddress
+      ? walletAddress
+      : DEMO_WALLETS.client;
 
   const clientJobs = records.filter(
-    (r) => r.job.client === activeClientWallet || r.job.client === DEMO_WALLETS.client
+    (r) =>
+      r.job.client === activeClientWallet ||
+      r.job.client === DEMO_WALLETS.client ||
+      (role === "seller" && r.job.client === DEMO_WALLETS.seller)
   );
 
   const lockedLamports = clientJobs
@@ -126,7 +136,7 @@ export default function ClientPortalPage() {
     setIsSubmitting(true);
 
     try {
-      if (role !== "client") loginAsDemo("client");
+      if (!role) loginAsDemo("client");
       const created = await createJobWithPollar(
         title.trim(),
         description.trim() || "Written acceptance criteria attached.",
@@ -149,10 +159,6 @@ export default function ClientPortalPage() {
       setIsSubmitting(false);
     }
   };
-
-  if (!isLoaded) {
-    return <div className="text-sm text-slate-500">Loading Client Portal...</div>;
-  }
 
   const canPayWithPollar = Boolean(pollarAddress && isPollarVerified);
 
@@ -412,7 +418,7 @@ export default function ClientPortalPage() {
                 <Link
                   href={`/jobs/${rec.pda}`}
                   onClick={() => {
-                    if (role !== "client") loginAsDemo("client");
+                    if (!role) loginAsDemo("client");
                   }}
                   className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
                 >

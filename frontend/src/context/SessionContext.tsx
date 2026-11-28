@@ -19,14 +19,18 @@ interface SessionContextValue {
   isWalletConnected: boolean;
   isPollarConnected: boolean;
   isPollarVerified: boolean;
+  hasCompletedOnboarding: boolean;
+  completeOnboarding: (nextRole: UserRole) => void;
   loginAsDemo: (role: UserRole) => void;
   setRole: (role: UserRole) => void;
+  switchRole: () => void;
   logout: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
-const STORAGE_KEY = "proofpay_demo_role";
+const ROLE_STORAGE_KEY = "proofpay_demo_role";
+const ONBOARDING_STORAGE_KEY = "proofpay_pollar_onboarded";
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const {
@@ -38,6 +42,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   } = usePollar();
 
   const [role, setRoleState] = useState<UserRole | null>(null);
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
   const solanaPollarWallet = Array.isArray(pollarWallets)
@@ -49,34 +54,41 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   const isPollarVerified = Boolean(isPollarAuthenticated && isPollarVerifiedRaw);
 
   useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY) as UserRole | null;
-    if (saved && saved in DEMO_WALLETS) {
-      setRoleState(saved);
+    const savedRole = window.localStorage.getItem(ROLE_STORAGE_KEY) as UserRole | null;
+    if (savedRole && savedRole in DEMO_WALLETS) {
+      setRoleState(savedRole);
     }
+    const onboarded = window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
+    setHasCompletedOnboarding(onboarded);
     setIsReady(true);
   }, []);
 
-  useEffect(() => {
-    if (!isReady) return;
-
-    if (pollarAddress && !role) {
-      setRoleState("client");
-      window.localStorage.setItem(STORAGE_KEY, "client");
-    }
-  }, [isReady, pollarAddress, role]);
-
   const setRole = (nextRole: UserRole) => {
     setRoleState(nextRole);
-    window.localStorage.setItem(STORAGE_KEY, nextRole);
+    window.localStorage.setItem(ROLE_STORAGE_KEY, nextRole);
+  };
+
+  const completeOnboarding = (nextRole: UserRole) => {
+    setRoleState(nextRole);
+    setHasCompletedOnboarding(true);
+    window.localStorage.setItem(ROLE_STORAGE_KEY, nextRole);
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
   };
 
   const loginAsDemo = (nextRole: UserRole) => {
     setRole(nextRole);
   };
 
+  const switchRole = () => {
+    setRoleState(null);
+    window.localStorage.removeItem(ROLE_STORAGE_KEY);
+  };
+
   const logout = () => {
     setRoleState(null);
-    window.localStorage.removeItem(STORAGE_KEY);
+    setHasCompletedOnboarding(false);
+    window.localStorage.removeItem(ROLE_STORAGE_KEY);
+    window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
     if (isPollarAuthenticated) {
       try {
         pollarLogout();
@@ -100,8 +112,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         isWalletConnected: isReady ? Boolean(pollarAddress) : false,
         isPollarConnected: isReady ? Boolean(pollarAddress) : false,
         isPollarVerified: isReady ? isPollarVerified : false,
+        hasCompletedOnboarding: isReady ? hasCompletedOnboarding : false,
+        completeOnboarding,
         loginAsDemo,
         setRole,
+        switchRole,
         logout,
       }}
     >

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { usePollar } from "@pollar/react";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
@@ -10,8 +11,16 @@ import { evaluateSellerRate, SellerRateAssessment } from "../../lib/api";
 const FALLBACK_SOL_USD = 150;
 
 export default function SellerPortalPage() {
+  const router = useRouter();
   const { records, isLoaded } = useJobs();
-  const { role, walletAddress, isPollarConnected, loginAsDemo } = useSession();
+  const {
+    role,
+    walletAddress,
+    isPollarConnected,
+    isReady,
+    loginAsDemo,
+    switchRole,
+  } = useSession();
   const { openReceiveModal, openSendModal } = usePollar();
 
   const [solUsdRate, setSolUsdRate] = useState<number>(FALLBACK_SOL_USD);
@@ -46,7 +55,7 @@ export default function SellerPortalPage() {
 
   // Evaluate each job's payout against the AI fair-price benchmark
   useEffect(() => {
-    if (!isLoaded || sellerJobs.length === 0) return;
+    if (!isReady || !isLoaded || role === "client" || sellerJobs.length === 0) return;
     let active = true;
 
     Promise.all(
@@ -71,10 +80,48 @@ export default function SellerPortalPage() {
     return () => {
       active = false;
     };
-  }, [isLoaded, records, activeSellerWallet]);
+  }, [isReady, isLoaded, role, records, activeSellerWallet]);
 
-  if (!isLoaded) {
+  if (!isReady || !isLoaded) {
     return <div className="text-sm text-slate-500">Loading Seller Portal...</div>;
+  }
+
+  if (role === "client") {
+    return (
+      <div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-amber-50/70 p-6 shadow-xs space-y-4">
+        <div className="space-y-1">
+          <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+            Customer Session Active
+          </span>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">
+            Seller Portal Not Available for Customers
+          </h1>
+          <p className="text-sm text-slate-600">
+            You are signed in as a <strong>Customer</strong> and cannot view the Seller Portal. Switch users to sign in or select a Seller account.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={() => {
+              switchRole();
+              router.push("/login");
+            }}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
+          >
+            Switch Users →
+          </button>
+
+          <Link
+            href="/client"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition"
+          >
+            Back to Client Portal
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   const pendingLamports = sellerJobs
@@ -87,26 +134,27 @@ export default function SellerPortalPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+      {/* Top Header + Right-Aligned Wallet Actions */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">
             Seller Portal (Freelancer)
           </h1>
           <p className="text-sm text-slate-600">
             Inspect AI payout ratings, submit deliverables, and track non-custodial escrow releases.
           </p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="text-xs text-slate-500">
             1 SOL ≈ ${solUsdRate.toFixed(2)} USD{isLiveRate ? "" : " (est.)"}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          {isPollarConnected && (
-            <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {isPollarConnected ? (
+            <>
               <button
                 type="button"
                 onClick={() => openReceiveModal()}
-                className="rounded-lg border border-blue-200 bg-white px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                className="inline-flex h-9 items-center rounded-lg border border-blue-200 bg-white px-3.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 transition"
               >
                 Receive
               </button>
@@ -115,32 +163,52 @@ export default function SellerPortalPage() {
                 onClick={() =>
                   typeof openSendModal === "function" ? openSendModal() : openReceiveModal()
                 }
-                className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                className="inline-flex h-9 items-center rounded-lg border border-slate-300 bg-white px-3.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition"
               >
                 Send / Withdraw
               </button>
-            </div>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-3.5 text-xs font-semibold text-white hover:bg-blue-700 transition"
+            >
+              Connect Pollar Wallet
+            </Link>
           )}
+        </div>
+      </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-right shadow-xs">
+      {/* Equal-Height 2-Column KPI Cards */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+          <div>
             <div className="text-xs font-medium text-slate-500">In-Progress Escrow</div>
-            <div className="text-xl font-bold text-indigo-600 tabular-nums">
+            <div className="mt-1 text-2xl font-bold text-indigo-600 tabular-nums">
               {(pendingLamports / 1_000_000_000).toFixed(2)} SOL
             </div>
-            <div className="text-xs text-slate-500 tabular-nums">
+            <div className="mt-0.5 text-xs text-slate-500 tabular-nums">
               ≈ ${((pendingLamports / 1_000_000_000) * solUsdRate).toFixed(2)} USD
             </div>
           </div>
+          <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+            Active
+          </span>
+        </div>
 
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-right shadow-xs">
+        <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/60 p-5 shadow-xs">
+          <div>
             <div className="text-xs font-medium text-emerald-900">Released Earnings</div>
-            <div className="text-xl font-bold text-emerald-700 tabular-nums">
+            <div className="mt-1 text-2xl font-bold text-emerald-700 tabular-nums">
               {(earnedLamports / 1_000_000_000).toFixed(2)} SOL
             </div>
-            <div className="text-xs text-emerald-800/80 tabular-nums">
+            <div className="mt-0.5 text-xs text-emerald-800/80 tabular-nums">
               ≈ ${((earnedLamports / 1_000_000_000) * solUsdRate).toFixed(2)} USD
             </div>
           </div>
+          <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+            Paid Out
+          </span>
         </div>
       </div>
 
