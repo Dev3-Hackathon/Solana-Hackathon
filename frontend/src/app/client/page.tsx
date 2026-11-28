@@ -10,7 +10,7 @@ import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
 const FALLBACK_SOL_USD = 150;
 
 export default function ClientPortalPage() {
-  const { records, isLoaded, createJob, createJobWithPollar } = useJobs();
+  const { records, isLoaded, createJobWithPollar } = useJobs();
   const {
     role,
     walletAddress,
@@ -24,7 +24,6 @@ export default function ClientPortalPage() {
   const [description, setDescription] = useState("");
   const [amountSol, setAmountSol] = useState("1.5");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [paymentMode, setPaymentMode] = useState<"phantom" | "pollar" | null>(null);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -109,40 +108,8 @@ export default function ClientPortalPage() {
     .filter((r) => !["Released", "Refunded", "Cancelled"].includes(r.job.status))
     .reduce((sum, r) => sum + r.job.amount, 0);
 
-  const handleCreateWithPhantom = async (e: React.FormEvent) => {
+  const handlePayEscrowWithPollar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting || !validateScopeAndBounds()) return;
-
-    setCreateError(null);
-    setCreatedBanner(null);
-    setIsSubmitting(true);
-    setPaymentMode("phantom");
-
-    try {
-      if (role !== "client") loginAsDemo("client");
-      const created = await createJob(
-        title.trim(),
-        description.trim() || "Written acceptance criteria attached.",
-        validSol || 1
-      );
-      setTitle("");
-      setDescription("");
-      setPriceEstimate(null);
-      setCreatedBanner(
-        `Created & funded Job #${created.job.jobId} with Phantom (${validSol.toFixed(2)} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
-      );
-      setTimeout(() => setCreatedBanner(null), 5000);
-    } catch (err) {
-      setCreateError(
-        err instanceof Error ? err.message : "Failed to create escrow job."
-      );
-    } finally {
-      setIsSubmitting(false);
-      setPaymentMode(null);
-    }
-  };
-
-  const handlePayEscrowWithPollar = async () => {
     if (isSubmitting || !validateScopeAndBounds()) return;
 
     if (!pollarAddress) {
@@ -157,7 +124,6 @@ export default function ClientPortalPage() {
     setCreateError(null);
     setCreatedBanner(null);
     setIsSubmitting(true);
-    setPaymentMode("pollar");
 
     try {
       if (role !== "client") loginAsDemo("client");
@@ -181,7 +147,6 @@ export default function ClientPortalPage() {
       );
     } finally {
       setIsSubmitting(false);
-      setPaymentMode(null);
     }
   };
 
@@ -199,7 +164,7 @@ export default function ClientPortalPage() {
             Client Portal (Customer)
           </h1>
           <p className="text-sm text-slate-600">
-            Fund non-custodial Solana escrows, inspect AI verdicts, or dispute timed-out reviews.
+            Fund non-custodial Solana escrows with Pollar, inspect AI verdicts, or dispute timed-out reviews.
           </p>
         </div>
 
@@ -216,7 +181,7 @@ export default function ClientPortalPage() {
 
       {/* Create & Fund Escrow Form */}
       <form
-        onSubmit={handleCreateWithPhantom}
+        onSubmit={handlePayEscrowWithPollar}
         className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -350,7 +315,11 @@ export default function ClientPortalPage() {
 
         {!canPayWithPollar && (
           <p className="text-xs text-slate-500">
-            To use <strong>Pay escrow with Pollar</strong>, sign in with Pollar and ensure your session is verified.
+            Sign in with Pollar and verify your session on{" "}
+            <Link href="/login" className="font-semibold text-blue-600 hover:underline">
+              /login
+            </Link>{" "}
+            to pay escrow with Pollar.
           </p>
         )}
 
@@ -381,24 +350,11 @@ export default function ClientPortalPage() {
             )}
 
             <button
-              type="button"
+              type="submit"
               disabled={isSubmitting || isOutOfBounds || !canPayWithPollar}
-              onClick={handlePayEscrowWithPollar}
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting && paymentMode === "pollar"
-                ? "Paying with Pollar..."
-                : "Pay escrow with Pollar"}
-            </button>
-
-            <button
-              type="submit"
-              disabled={isSubmitting || isOutOfBounds}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isSubmitting && paymentMode === "phantom"
-                ? "Creating & Linking Spec..."
-                : "Pay with Phantom"}
+              {isSubmitting ? "Paying with Pollar..." : "Pay escrow with Pollar"}
             </button>
           </div>
         </div>
