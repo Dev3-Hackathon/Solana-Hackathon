@@ -10,8 +10,8 @@ import { reportsRouter } from "./routes/reports";
 import { deliverablesRouter } from "./routes/deliverables";
 import { jobsRouter } from "./routes/jobs";
 
-app.set("trust proxy", 1);
 const app = express();
+app.set("trust proxy", 1);
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
 
