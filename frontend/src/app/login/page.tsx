@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import { usePollar, WalletButton } from "@pollar/react";
 import { DEMO_WALLETS, UserRole, useSession } from "../../context/SessionContext";
 
 const WalletMultiButton = dynamic(
@@ -46,11 +47,69 @@ const ROLES: {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { role, walletAddress, isWalletConnected, setRole, loginAsDemo } = useSession();
+  const {
+    role,
+    walletAddress,
+    isWalletConnected,
+    isPollarConnected,
+    setRole,
+    loginAsDemo,
+  } = useSession();
+
+  const {
+    isAuthenticated: isPollarAuthenticated,
+    wallet: pollarWallet,
+    wallets: pollarWallets,
+    hasWallet,
+    createWallet,
+    login: pollarLogin,
+    logout: pollarLogout,
+    openReceiveModal,
+  } = usePollar();
 
   const [showAdminPrompt, setShowAdminPrompt] = useState(false);
   const [adminPasscode, setAdminPasscode] = useState("");
   const [adminError, setAdminError] = useState<string | null>(null);
+  const [pollarError, setPollarError] = useState<string | null>(null);
+  const [copiedAddress, setCopiedAddress] = useState(false);
+  const [creatingWallet, setCreatingWallet] = useState(false);
+
+  const solanaPollarWallet = Array.isArray(pollarWallets)
+    ? pollarWallets.find((w) => w.chain === "SOLANA")
+    : undefined;
+  const activePollarAddress =
+    solanaPollarWallet?.address ?? pollarWallet?.address ?? null;
+
+  const handlePollarGoogleLogin = () => {
+    setPollarError(null);
+    pollarLogin({ provider: "google" });
+  };
+
+  const handlePollarEmailLogin = () => {
+    setPollarError(null);
+    pollarLogin({ provider: "email" });
+  };
+
+  const handleCreatePollarWallet = async () => {
+    setPollarError(null);
+    setCreatingWallet(true);
+    try {
+      await createWallet();
+    } catch (err) {
+      setPollarError(
+        err instanceof Error ? err.message : "Could not create Pollar wallet."
+      );
+    } finally {
+      setCreatingWallet(false);
+    }
+  };
+
+  const handleCopyPollarAddress = async () => {
+    if (!activePollarAddress) return;
+    await navigator.clipboard.writeText(activePollarAddress);
+    setCopiedAddress(true);
+    setTimeout(() => setCopiedAddress(false), 2000);
+  };
 
   const completeLogin = (selected: (typeof ROLES)[number]) => {
     if (isWalletConnected) {
@@ -100,23 +159,128 @@ export default function LoginPage() {
           Connect Wallet &amp; Select Portal
         </h1>
         <p className="text-sm text-slate-600">
-          Connect a Solana Devnet wallet (Phantom or Solflare) to sign real transactions, or continue with a 1-click demo wallet.
+          Sign in with Pollar for an instant gas-sponsored Solana wallet, connect Phantom/Solflare, or use a 1-click demo wallet.
         </p>
       </div>
 
-      {/* Real Solana Wallet Adapter Box */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50/60 p-5">
+      {/* Pollar Social / Embedded Wallet Box */}
+      <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-5 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-slate-900">
+                Pollar Embedded Solana Wallet
+              </span>
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
+                Gas-Sponsored USDC
+              </span>
+            </div>
+
+            {activePollarAddress ? (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-emerald-700">
+                  Provisioned Address:{" "}
+                  <span className="font-mono break-all">{activePollarAddress}</span>
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  Fund this Devnet address via Solana Faucet (SOL) &amp; Circle Faucet (USDC).
+                </p>
+              </div>
+            ) : isPollarAuthenticated ? (
+              <p className="text-xs text-amber-700 font-medium">
+                {hasWallet
+                  ? "Authenticated — resolving Solana wallet address..."
+                  : "Signed in with no wallet yet — click Create Wallet or use the Pollar button."}
+              </p>
+            ) : (
+              <p className="text-xs text-slate-600">
+                No browser extension required · Creates a Solana Devnet wallet on sign-in
+              </p>
+            )}
+          </div>
+
+          <WalletButton />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {!isPollarAuthenticated ? (
+            <>
+              <button
+                type="button"
+                onClick={handlePollarGoogleLogin}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
+              >
+                Continue with Google
+              </button>
+              <button
+                type="button"
+                onClick={handlePollarEmailLogin}
+                className="rounded-lg border border-blue-300 bg-white px-3.5 py-2 text-xs font-semibold text-blue-900 hover:bg-blue-50 transition"
+              >
+                Email Login
+              </button>
+            </>
+          ) : (
+            <>
+              {!activePollarAddress && (
+                <button
+                  type="button"
+                  disabled={creatingWallet}
+                  onClick={handleCreatePollarWallet}
+                  className="rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  {creatingWallet ? "Creating Wallet..." : "Create Wallet"}
+                </button>
+              )}
+              {activePollarAddress && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleCopyPollarAddress}
+                    className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {copiedAddress ? "Copied!" : "Copy Address"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReceiveModal()}
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+                  >
+                    Receive / QR
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => pollarLogout()}
+                className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+              >
+                Disconnect
+              </button>
+            </>
+          )}
+        </div>
+
+        {pollarError && (
+          <p className="text-xs font-medium text-red-600">{pollarError}</p>
+        )}
+      </div>
+
+      {/* External Solana Wallet Adapter Box */}
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
         <div className="space-y-1">
           <div className="text-sm font-semibold text-slate-900">
-            Solana Devnet Wallet
+            External Solana Wallet (Phantom / Solflare)
           </div>
-          {isWalletConnected && walletAddress ? (
+          {isWalletConnected && !isPollarConnected && walletAddress ? (
             <p className="text-xs text-emerald-700 font-medium">
               Connected: <span className="font-mono">{walletAddress}</span>
             </p>
           ) : (
             <p className="text-xs text-slate-600">
-              No wallet connected · Using mock demo addresses until connected
+              {isPollarConnected
+                ? "Pollar wallet is currently active above"
+                : "Optional browser extension connection"}
             </p>
           )}
         </div>
