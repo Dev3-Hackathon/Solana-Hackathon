@@ -53,6 +53,8 @@ app.get("/api/health", async (_req, res) => {
 
 app.use("/api/deliverables/snapshot", costlyEndpointLimiter);
 app.use("/api/jobs/:jobPda/evaluate", costlyEndpointLimiter);
+app.use("/api/deliverables/snapshot", costlyEndpointLimiter);
+app.use("/api/jobs/create-for", costlyEndpointLimiter);
 
 app.use("/api", specsRouter);
 app.use("/api", reportsRouter);
