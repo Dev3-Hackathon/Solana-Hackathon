@@ -25,21 +25,24 @@ const ROLES: {
   {
     id: "client",
     title: "Client (Customer)",
-    subtitle: "Create & fund escrow jobs, approve deliveries, or dispute timed-out reviews.",
+    subtitle:
+      "Sign in with Google or connect a wallet to create & fund escrow jobs, approve deliveries, or dispute timed-out reviews.",
     route: "/client",
-    badge: "Buyer",
+    badge: "Buyer · Google / Wallet",
   },
   {
     id: "seller",
     title: "Seller (Freelancer)",
-    subtitle: "Submit deliverables against locked escrows and trigger AI verification.",
+    subtitle:
+      "Connect Phantom to submit deliverables against locked escrows and trigger AI verification.",
     route: "/seller",
-    badge: "Provider",
+    badge: "Provider · Phantom",
   },
   {
     id: "admin",
     title: "Admin / Protocol Operator",
-    subtitle: "Inspect disputed escrows, timeout audit logs, and resolve split payouts.",
+    subtitle:
+      "Inspect disputed escrows, timeout audit logs, and resolve split payouts.",
     route: "/admin",
     badge: "Arbiter Admin",
   },
@@ -50,8 +53,12 @@ export default function LoginPage() {
   const {
     role,
     walletAddress,
+    pollarAddress,
+    phantomAddress,
     isWalletConnected,
     isPollarConnected,
+    isPollarVerified,
+    connectPhantom,
     setRole,
     loginAsDemo,
   } = useSession();
@@ -71,6 +78,9 @@ export default function LoginPage() {
   const [adminPasscode, setAdminPasscode] = useState("");
   const [adminError, setAdminError] = useState<string | null>(null);
   const [pollarError, setPollarError] = useState<string | null>(null);
+  const [phantomError, setPhantomError] = useState<string | null>(null);
+  const [isConnectingPhantom, setIsConnectingPhantom] = useState(false);
+  const [roleNotice, setRoleNotice] = useState<string | null>(null);
   const [copiedAddress, setCopiedAddress] = useState(false);
   const [creatingWallet, setCreatingWallet] = useState(false);
 
@@ -78,16 +88,52 @@ export default function LoginPage() {
     ? pollarWallets.find((w) => w.chain === "SOLANA")
     : undefined;
   const activePollarAddress =
-    solanaPollarWallet?.address ?? pollarWallet?.address ?? null;
+    solanaPollarWallet?.address ?? pollarWallet?.address ?? pollarAddress ?? null;
 
-  const handlePollarGoogleLogin = () => {
+  const hasWalletMismatch = Boolean(
+    activePollarAddress &&
+      phantomAddress &&
+      activePollarAddress !== phantomAddress
+  );
+
+  const triggerPollarProviderLogin = (provider: "google" | "email") => {
     setPollarError(null);
-    pollarLogin({ provider: "google" });
+    setRoleNotice(null);
+    try {
+      const result = pollarLogin({ provider }) as unknown | Promise<unknown>;
+      if (result && typeof (result as Promise<unknown>).catch === "function") {
+        (result as Promise<unknown>).catch((err: unknown) => {
+          setPollarError(
+            err instanceof Error
+              ? err.message
+              : `Pollar ${provider} sign-in failed.`
+          );
+        });
+      }
+    } catch (err) {
+      setPollarError(
+        err instanceof Error
+          ? err.message
+          : `Pollar ${provider} sign-in failed.`
+      );
+    }
   };
 
-  const handlePollarEmailLogin = () => {
-    setPollarError(null);
-    pollarLogin({ provider: "email" });
+  const handleDirectPhantomConnect = async () => {
+    setPhantomError(null);
+    setRoleNotice(null);
+    setIsConnectingPhantom(true);
+    try {
+      await connectPhantom();
+    } catch (err) {
+      setPhantomError(
+        err instanceof Error
+          ? err.message
+          : "Could not open Phantom. Make sure the Phantom extension is installed and unlocked."
+      );
+    } finally {
+      setIsConnectingPhantom(false);
+    }
   };
 
   const handleCreatePollarWallet = async () => {
@@ -121,6 +167,13 @@ export default function LoginPage() {
   };
 
   const handleSelectRole = (selected: (typeof ROLES)[number]) => {
+    setRoleNotice(null);
+
+    if (selected.id === "seller" && hasWalletMismatch) {
+      setRoleNotice("Connect the same Phantom wallet to sign");
+      return;
+    }
+
     if (selected.id === "admin") {
       const isAllowlisted =
         isWalletConnected &&
@@ -159,21 +212,41 @@ export default function LoginPage() {
           Connect Wallet &amp; Select Portal
         </h1>
         <p className="text-sm text-slate-600">
-          Sign in with Pollar for an instant gas-sponsored Solana wallet, connect Phantom/Solflare, or use a 1-click demo wallet.
+          Clients can sign in with Google or a wallet; Sellers can connect Phantom; or select a demo wallet to explore.
         </p>
       </div>
+
+      {hasWalletMismatch && (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs font-semibold text-amber-900"
+        >
+          Connect the same Phantom wallet to sign
+        </div>
+      )}
 
       {/* Pollar Social / Embedded Wallet Box */}
       <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-5 space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-semibold text-slate-900">
                 Pollar Embedded Solana Wallet
               </span>
               <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
                 Gas-Sponsored USDC
               </span>
+              {isPollarAuthenticated && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    isPollarVerified
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800"
+                  }`}
+                >
+                  {isPollarVerified ? "Verified" : "Unverified"}
+                </span>
+              )}
             </div>
 
             {activePollarAddress ? (
@@ -194,7 +267,7 @@ export default function LoginPage() {
               </p>
             ) : (
               <p className="text-xs text-slate-600">
-                No browser extension required · Creates a Solana Devnet wallet on sign-in
+                Clients can continue with Google · Disconnect Pollar if testing standalone Phantom
               </p>
             )}
           </div>
@@ -207,14 +280,14 @@ export default function LoginPage() {
             <>
               <button
                 type="button"
-                onClick={handlePollarGoogleLogin}
+                onClick={() => triggerPollarProviderLogin("google")}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-blue-700 transition"
               >
-                Continue with Google
+                Continue with Google (Client)
               </button>
               <button
                 type="button"
-                onClick={handlePollarEmailLogin}
+                onClick={() => triggerPollarProviderLogin("email")}
                 className="rounded-lg border border-blue-300 bg-white px-3.5 py-2 text-xs font-semibold text-blue-900 hover:bg-blue-50 transition"
               >
                 Email Login
@@ -267,26 +340,53 @@ export default function LoginPage() {
       </div>
 
       {/* External Solana Wallet Adapter Box */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-5">
-        <div className="space-y-1">
-          <div className="text-sm font-semibold text-slate-900">
-            External Solana Wallet (Phantom / Solflare)
+      <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="text-sm font-semibold text-slate-900">
+              External Solana Wallet (Phantom / Solflare)
+            </div>
+            {phantomAddress ? (
+              <p className="text-xs text-emerald-700 font-medium">
+                Phantom Connected: <span className="font-mono">{phantomAddress}</span>
+              </p>
+            ) : (
+              <p className="text-xs text-slate-600">
+                {isPollarConnected
+                  ? "Pollar is active above — click Connect Phantom or Disconnect Pollar to use Phantom alone"
+                  : "Connect Phantom browser extension for Seller / wallet signing"}
+              </p>
+            )}
           </div>
-          {isWalletConnected && !isPollarConnected && walletAddress ? (
-            <p className="text-xs text-emerald-700 font-medium">
-              Connected: <span className="font-mono">{walletAddress}</span>
-            </p>
-          ) : (
-            <p className="text-xs text-slate-600">
-              {isPollarConnected
-                ? "Pollar wallet is currently active above"
-                : "Optional browser extension connection"}
-            </p>
-          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {!phantomAddress && (
+              <button
+                type="button"
+                disabled={isConnectingPhantom}
+                onClick={handleDirectPhantomConnect}
+                className="rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              >
+                {isConnectingPhantom ? "Connecting..." : "Connect Phantom"}
+              </button>
+            )}
+            <WalletMultiButton />
+          </div>
         </div>
 
-        <WalletMultiButton />
+        {phantomError && (
+          <p className="text-xs font-medium text-red-600">{phantomError}</p>
+        )}
       </div>
+
+      {roleNotice && (
+        <div
+          role="alert"
+          className="rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-xs font-semibold text-amber-900"
+        >
+          {roleNotice}
+        </div>
+      )}
 
       {/* Role / Portal Selector */}
       <div className="space-y-3">

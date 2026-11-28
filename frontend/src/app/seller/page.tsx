@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePollar } from "@pollar/react";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
 import { evaluateSellerRate, SellerRateAssessment } from "../../lib/api";
@@ -10,7 +11,8 @@ const FALLBACK_SOL_USD = 150;
 
 export default function SellerPortalPage() {
   const { records, isLoaded } = useJobs();
-  const { role, walletAddress, loginAsDemo } = useSession();
+  const { role, walletAddress, isPollarConnected, loginAsDemo } = useSession();
+  const { openReceiveModal, openSendModal } = usePollar();
 
   const [solUsdRate, setSolUsdRate] = useState<number>(FALLBACK_SOL_USD);
   const [isLiveRate, setIsLiveRate] = useState<boolean>(false);
@@ -99,6 +101,27 @@ export default function SellerPortalPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {isPollarConnected && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => openReceiveModal()}
+                className="rounded-lg border border-blue-200 bg-white px-3.5 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                Receive
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  typeof openSendModal === "function" ? openSendModal() : openReceiveModal()
+                }
+                className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Send / Withdraw
+              </button>
+            </div>
+          )}
+
           <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-right shadow-xs">
             <div className="text-xs font-medium text-slate-500">In-Progress Escrow</div>
             <div className="text-xl font-bold text-indigo-600 tabular-nums">

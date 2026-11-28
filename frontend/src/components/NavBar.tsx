@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { usePollar } from "@pollar/react";
+import { usePollar, WalletButton } from "@pollar/react";
 import { useSession } from "../context/SessionContext";
 import { fetchBackendHealth } from "../lib/api";
 
@@ -131,6 +131,8 @@ export default function Navbar() {
             <span className="hidden rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 sm:inline-block">
               Devnet · Pollar
             </span>
+
+            {isPollarConnected && <WalletButton />}
 
             {isReady && role && walletAddress ? (
               <div className="flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-1.5 text-xs">

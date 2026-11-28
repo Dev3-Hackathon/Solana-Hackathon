@@ -261,6 +261,21 @@ function JobDetailContent() {
         )}
       </div>
 
+      {/* Payout Confirmation Notice for Finalized / Released Jobs */}
+      {["Released", "Resolved"].includes(job.status) && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4 text-xs text-emerald-950 space-y-1">
+          <div className="font-semibold">Escrow Finalized &amp; Payout Dispatched</div>
+          <p className="text-emerald-900">
+            Funds have been released from PDA{" "}
+            <span className="font-mono">
+              {pda.slice(0, 8)}...{pda.slice(-6)}
+            </span>
+            . Open your Pollar wallet menu in the navbar to check your updated balance and transaction
+            history.
+          </p>
+        </div>
+      )}
+
       {/* 1. SELLER: Submit Deliverable (when status is Funded) */}
       {job.status === "Funded" && (
         <form

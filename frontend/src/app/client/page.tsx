@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePollar } from "@pollar/react";
 import { useJobs } from "../../context/JobContext";
 import { DEMO_WALLETS, useSession } from "../../context/SessionContext";
 import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
@@ -9,13 +10,21 @@ import { estimateJobPrice, PriceEstimateResponse } from "../../lib/api";
 const FALLBACK_SOL_USD = 150;
 
 export default function ClientPortalPage() {
-  const { records, isLoaded, createJob } = useJobs();
-  const { role, walletAddress, loginAsDemo } = useSession();
+  const { records, isLoaded, createJob, createJobWithPollar } = useJobs();
+  const {
+    role,
+    walletAddress,
+    pollarAddress,
+    isPollarVerified,
+    loginAsDemo,
+  } = useSession();
+  const { sendPayment } = usePollar();
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [amountSol, setAmountSol] = useState("1.5");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [paymentMode, setPaymentMode] = useState<"phantom" | "pollar" | null>(null);
   const [createdBanner, setCreatedBanner] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -50,6 +59,26 @@ export default function ClientPortalPage() {
   const isHighball = priceEstimate !== null && validSol > priceEstimate.maxSol;
   const isOutOfBounds = isLowball || isHighball;
 
+  const validateScopeAndBounds = (): boolean => {
+    if (!title.trim()) {
+      setCreateError("Please enter a job title.");
+      return false;
+    }
+    if (isLowball && priceEstimate) {
+      setCreateError(
+        `Lowball protection: Amount (${validSol.toFixed(2)} SOL) is below the AI minimum of ${priceEstimate.minSol.toFixed(2)} SOL.`
+      );
+      return false;
+    }
+    if (isHighball && priceEstimate) {
+      setCreateError(
+        `Highball protection: Amount (${validSol.toFixed(2)} SOL) exceeds the AI maximum of ${priceEstimate.maxSol.toFixed(2)} SOL.`
+      );
+      return false;
+    }
+    return true;
+  };
+
   const handleGetAiEstimate = async () => {
     if (!title.trim() && !description.trim()) {
       setCreateError("Enter a job title or acceptance criteria first so AI can price the scope.");
@@ -80,27 +109,14 @@ export default function ClientPortalPage() {
     .filter((r) => !["Released", "Refunded", "Cancelled"].includes(r.job.status))
     .reduce((sum, r) => sum + r.job.amount, 0);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreateWithPhantom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isSubmitting) return;
-
-    if (isLowball && priceEstimate) {
-      setCreateError(
-        `Lowball protection: Amount (${validSol.toFixed(2)} SOL) is below the AI minimum of ${priceEstimate.minSol.toFixed(2)} SOL.`
-      );
-      return;
-    }
-
-    if (isHighball && priceEstimate) {
-      setCreateError(
-        `Highball protection: Amount (${validSol.toFixed(2)} SOL) exceeds the AI maximum of ${priceEstimate.maxSol.toFixed(2)} SOL.`
-      );
-      return;
-    }
+    if (isSubmitting || !validateScopeAndBounds()) return;
 
     setCreateError(null);
     setCreatedBanner(null);
     setIsSubmitting(true);
+    setPaymentMode("phantom");
 
     try {
       if (role !== "client") loginAsDemo("client");
@@ -113,21 +129,67 @@ export default function ClientPortalPage() {
       setDescription("");
       setPriceEstimate(null);
       setCreatedBanner(
-        `Created & funded Job #${created.job.jobId} (${validSol.toFixed(2)} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
+        `Created & funded Job #${created.job.jobId} with Phantom (${validSol.toFixed(2)} SOL ≈ $${usdEstimate.toFixed(2)} USD locked in PDA).`
       );
-      setTimeout(() => setCreatedBanner(null), 4000);
+      setTimeout(() => setCreatedBanner(null), 5000);
     } catch (err) {
       setCreateError(
         err instanceof Error ? err.message : "Failed to create escrow job."
       );
     } finally {
       setIsSubmitting(false);
+      setPaymentMode(null);
+    }
+  };
+
+  const handlePayEscrowWithPollar = async () => {
+    if (isSubmitting || !validateScopeAndBounds()) return;
+
+    if (!pollarAddress) {
+      setCreateError("Connect a Pollar Solana wallet on /login to pay escrow with Pollar.");
+      return;
+    }
+    if (!isPollarVerified) {
+      setCreateError("Pollar session is not verified yet. Complete verification before paying.");
+      return;
+    }
+
+    setCreateError(null);
+    setCreatedBanner(null);
+    setIsSubmitting(true);
+    setPaymentMode("pollar");
+
+    try {
+      if (role !== "client") loginAsDemo("client");
+      const created = await createJobWithPollar(
+        title.trim(),
+        description.trim() || "Written acceptance criteria attached.",
+        validSol || 1,
+        pollarAddress,
+        sendPayment
+      );
+      setTitle("");
+      setDescription("");
+      setPriceEstimate(null);
+      setCreatedBanner(
+        `Paid & confirmed Job #${created.job.jobId} via Pollar (${validSol.toFixed(2)} SOL locked in PDA ${created.pda.slice(0, 6)}...${created.pda.slice(-4)}).`
+      );
+      setTimeout(() => setCreatedBanner(null), 6000);
+    } catch (err) {
+      setCreateError(
+        err instanceof Error ? err.message : "Pollar escrow payment failed."
+      );
+    } finally {
+      setIsSubmitting(false);
+      setPaymentMode(null);
     }
   };
 
   if (!isLoaded) {
     return <div className="text-sm text-slate-500">Loading Client Portal...</div>;
   }
+
+  const canPayWithPollar = Boolean(pollarAddress && isPollarVerified);
 
   return (
     <div className="space-y-6">
@@ -154,7 +216,7 @@ export default function ClientPortalPage() {
 
       {/* Create & Fund Escrow Form */}
       <form
-        onSubmit={handleCreate}
+        onSubmit={handleCreateWithPhantom}
         className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4"
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -201,7 +263,7 @@ export default function ClientPortalPage() {
               <input
                 type="number"
                 step="0.05"
-                min="0.1"
+                min="0.001"
                 required
                 disabled={isSubmitting}
                 value={amountSol}
@@ -286,6 +348,12 @@ export default function ClientPortalPage() {
           </div>
         )}
 
+        {!canPayWithPollar && (
+          <p className="text-xs text-slate-500">
+            To use <strong>Pay escrow with Pollar</strong>, sign in with Pollar and ensure your session is verified.
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             {createdBanner && (
@@ -300,7 +368,7 @@ export default function ClientPortalPage() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!priceEstimate && (
               <button
                 type="button"
@@ -313,11 +381,24 @@ export default function ClientPortalPage() {
             )}
 
             <button
+              type="button"
+              disabled={isSubmitting || isOutOfBounds || !canPayWithPollar}
+              onClick={handlePayEscrowWithPollar}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting && paymentMode === "pollar"
+                ? "Paying with Pollar..."
+                : "Pay escrow with Pollar"}
+            </button>
+
+            <button
               type="submit"
               disabled={isSubmitting || isOutOfBounds}
               className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isSubmitting ? "Creating & Linking Spec..." : "Create & Lock Funds"}
+              {isSubmitting && paymentMode === "phantom"
+                ? "Creating & Linking Spec..."
+                : "Pay with Phantom"}
             </button>
           </div>
         </div>
